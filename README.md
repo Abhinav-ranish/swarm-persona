@@ -107,7 +107,7 @@ screenshots) and `guard/` (each proxy's refusals and observed 5xx).
 model: change the rules or `--fail-on` and see the new verdict for free. The test suite runs on
 recorded evidence the same way.
 
-The PR comment starts with a one-line gate, persona and findings table and a findings table; each
+The PR comment opens with two small tables (gate, personas, findings; then one row per finding); each
 finding's detail and screenshots, the sessions, the entry checks and the guard log are folded below.
 Set `report.images_repo` (a repository you create for this; private keeps them private) and
 screenshots are committed there, one commit per run, and embedded in the comment pinned to that
