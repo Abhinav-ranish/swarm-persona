@@ -131,6 +131,7 @@ async def run(cfg: Config, *, out: Path, pr: str | None = None, pr_context_file:
     if baseline and cfg.app.baseline_url and cfg.app.baseline_url != preview_url:
         targets.append(('baseline', cfg.app.baseline_url))
     meta = {'title': cfg.report.title, 'pr': pr, 'url': preview_url, 'baseline_url': cfg.app.baseline_url,
+            'app_hosts': sorted(cfg.app_hosts(preview_url)),
             'model': f'{cfg.llm.provider}:{cfg.llm.model}', 'version': __version__,
             'fail_on': cfg.report.fail_on, 'fail_on_unclassified': cfg.report.fail_on_unclassified,
             'no_em_dashes': cfg.report.no_em_dashes, 'notes': []}

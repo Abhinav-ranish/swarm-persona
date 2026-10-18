@@ -91,17 +91,35 @@ def render(meta: dict, verdict: dict, sessions: list[dict], checks: list[dict], 
     if dropped:
         lines += ['', f'The merge pass left out {len(dropped)} raw report(s): ' + '; '.join(
             f"{safe(d['title'], 80)} ({safe(d['reason'], 120)})" for d in dropped) + '.']
-    guard = [(s['name'], b) for s in sessions for b in s.get('guard_blocked', [])]
-    if guard:
-        lines += ['', f'The network guard refused {len(guard)} request(s): ' + '; '.join(
-            f"{safe(n, 40)}: {b.get('method')} {safe(path_of(b.get('url', '')), 80)} ({safe(b.get('reason'), 60)})"
-            for n, b in guard[:30]) + '.']
+    lines += guard_lines(sessions, meta.get('app_hosts') or [urlsplit(meta['url']).hostname or ''])
     if meta.get('notes'):
         lines += [''] + [f'- {safe(n, 300)}' for n in meta['notes']]
     lines += ['', f"_Simulated users: this shows where an agent got stuck, not real user behaviour. "
                   f"swarm-persona {meta.get('version', '')}_"]
     text = '\n'.join(lines)
     return text.replace(EM_DASH, ', ') if no_em_dashes else text
+
+
+def guard_lines(sessions: list[dict], app_hosts: list[str]) -> list[str]:
+    """Refusals grouped by request and reason, the app's own first; other sites in one count."""
+    own: dict[tuple, set] = {}
+    other = 0
+    for s in sessions:
+        for b in s.get('guard_blocked', []):
+            host = (urlsplit(b.get('url', '')).hostname or '').lower()
+            if host not in app_hosts:
+                other += 1
+                continue
+            key = (b.get('method'), path_of(b.get('url', '')), b.get('reason'))
+            own.setdefault(key, set()).add(s['name'])
+    if not own and not other:
+        return []
+    parts = [f"{m} {safe(p, 80)} ({safe(r, 60)}, {len(who)} persona{'s' if len(who) > 1 else ''})"
+             for (m, p, r), who in sorted(own.items(), key=lambda kv: -len(kv[1]))[:20]]
+    text = 'The network guard refused, on the app: ' + ('; '.join(parts) if parts else 'nothing') + '.'
+    if other:
+        text += f' It also refused {other} request(s) to other sites.'
+    return ['', text]
 
 
 def write(out: Path, report: str, data: dict) -> None:

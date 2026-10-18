@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .agent import QUIET
 from .config import Config
 
 VIEWPORTS = {'desktop': {'width': 1440, 'height': 900}, 'mobile': {'width': 390, 'height': 844}}
@@ -121,7 +122,7 @@ async def run_checks(cfg: Config, origin: str, label: str, targets: list[dict], 
     out = []
     async with async_playwright() as pw:
         browser = await pw.chromium.launch(headless=True, chromium_sandbox=sandbox, proxy={'server': proxy, 'bypass': '<-loopback>'},
-                                           args=['--disable-quic', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'])
+                                           args=['--disable-quic', '--force-webrtc-ip-handling-policy=disable_non_proxied_udp', *QUIET])
         try:
             for t in targets:
                 slug = re.sub(r'[^a-z0-9]+', '-', f"{label}-{t['journey']}-{t['device']}".lower()).strip('-')

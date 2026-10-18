@@ -210,3 +210,16 @@ def test_custom_actions_register_with_browser_use():
     finally:
         browser_use.Agent.run = original
     assert 'agent loop reached' in result['verdict']
+
+
+def test_guard_refusals_are_grouped_and_other_sites_counted():
+    from swarm_persona.report import guard_lines
+
+    sessions = [{'name': n, 'guard_blocked': [
+        {'method': 'POST', 'url': 'https://app.example.com/cdn-cgi/rum', 'reason': 'write outside the allowlist'},
+        {'method': 'POST', 'url': 'https://accounts.google.com/ListAccounts', 'reason': 'cross-origin write'}]}
+        for n in ('A', 'B')]
+    [_, text] = guard_lines(sessions, ['app.example.com'])
+    assert 'POST /cdn-cgi/rum (write outside the allowlist, 2 personas)' in text
+    assert '2 request(s) to other sites' in text and 'google' not in text
+    assert guard_lines([{'name': 'A', 'guard_blocked': []}], ['app.example.com']) == []

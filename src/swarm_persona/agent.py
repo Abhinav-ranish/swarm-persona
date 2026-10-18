@@ -35,6 +35,12 @@ def app_page(origin: str, url: str) -> str | None:
         return None
     return url
 
+# Chromium's own background traffic (sign-in, component updates, safe browsing) is not the app's
+# and only fills the guard log with refusals.
+QUIET = ['--disable-background-networking', '--disable-component-update', '--disable-sync', '--no-pings',
+         '--disable-domain-reliability', '--disable-client-side-phishing-detection', '--no-first-run',
+         '--disable-default-apps']
+
 GUARDRAILS = """Hard rules, no exceptions:
 - Stay on {origin}. Do not follow links to other sites.
 - Never publish, post, schedule, send, invite, delete, archive, pay, upgrade, connect an external
@@ -133,7 +139,7 @@ async def run_persona(cfg: Config, ctx: dict, persona: dict, label: str, origin:
         # certificate, which Chromium accepts here; the proxy still verifies the real sites'.
         proxy=ProxySettings(server=proxy.server, bypass='<-loopback>'),
         args=['--ignore-certificate-errors', '--disable-quic',
-              '--force-webrtc-ip-handling-policy=disable_non_proxied_udp'],
+              '--force-webrtc-ip-handling-policy=disable_non_proxied_udp', *QUIET]
     )
     agent = Agent(
         task=task_prompt(cfg, ctx, persona, origin), llm=chat_model(cfg.llm), tools=tools,
