@@ -1,0 +1,246 @@
+{
+  "meta": {
+    "title": "Persona swarm",
+    "pr": "7",
+    "url": "https://preview.example.com",
+    "baseline_url": "https://app.example.com",
+    "model": "bedrock:test",
+    "version": "0.1.0",
+    "fail_on": [
+      "blocker"
+    ],
+    "notes": []
+  },
+  "baseline_ran": true,
+  "checks": [
+    {
+      "target": "preview",
+      "journey": "write",
+      "device": "desktop",
+      "path": "/write",
+      "status": 200,
+      "error": null,
+      "console_errors": [],
+      "page_errors": [
+        "TypeError: x is undefined"
+      ],
+      "failed_requests": [],
+      "server_errors": [],
+      "selectors": [
+        {
+          "selector": "button:has-text('Save')",
+          "state": "not actionable (covered or detached)"
+        }
+      ],
+      "screenshot": null
+    },
+    {
+      "target": "preview",
+      "journey": "write",
+      "device": "mobile",
+      "path": "/write",
+      "status": 200,
+      "error": null,
+      "console_errors": [],
+      "page_errors": [],
+      "failed_requests": [],
+      "server_errors": [],
+      "selectors": [
+        {
+          "selector": "button:has-text('Save')",
+          "state": "not actionable (covered or detached)"
+        }
+      ],
+      "screenshot": null
+    },
+    {
+      "target": "baseline",
+      "journey": "write",
+      "device": "desktop",
+      "path": "/write",
+      "status": 200,
+      "error": null,
+      "console_errors": [],
+      "page_errors": [
+        "TypeError: x is undefined"
+      ],
+      "failed_requests": [],
+      "server_errors": [],
+      "selectors": [
+        {
+          "selector": "button:has-text('Save')",
+          "state": "ok"
+        }
+      ],
+      "screenshot": null
+    },
+    {
+      "target": "baseline",
+      "journey": "write",
+      "device": "mobile",
+      "path": "/write",
+      "status": 200,
+      "error": null,
+      "console_errors": [],
+      "page_errors": [],
+      "failed_requests": [],
+      "server_errors": [],
+      "selectors": [
+        {
+          "selector": "button:has-text('Save')",
+          "state": "ok"
+        }
+      ],
+      "screenshot": null
+    }
+  ],
+  "sessions": [
+    {
+      "id": 1,
+      "name": "P1",
+      "who": "a tester",
+      "device": "desktop",
+      "patience": "medium",
+      "journey": "write",
+      "goal": "g",
+      "success_criteria": "",
+      "start_path": "/write",
+      "target": "preview",
+      "verdict": "GAVE UP: stuck",
+      "achieved": false,
+      "crashed": false,
+      "steps": 5,
+      "tokens": 100,
+      "seconds": 10,
+      "guard_blocked": [],
+      "server_errors": []
+    },
+    {
+      "id": 2,
+      "name": "P2",
+      "who": "a tester",
+      "device": "mobile",
+      "patience": "medium",
+      "journey": "write",
+      "goal": "g",
+      "success_criteria": "",
+      "start_path": "/write",
+      "target": "preview",
+      "verdict": "GAVE UP: stuck",
+      "achieved": false,
+      "crashed": false,
+      "steps": 5,
+      "tokens": 100,
+      "seconds": 10,
+      "guard_blocked": [
+        {
+          "method": "POST",
+          "url": "https://preview.example.com/api/posts",
+          "dest": "empty",
+          "reason": "body sets status=published"
+        }
+      ],
+      "server_errors": []
+    },
+    {
+      "id": 1,
+      "name": "P1",
+      "who": "a tester",
+      "device": "desktop",
+      "patience": "medium",
+      "journey": "write",
+      "goal": "g",
+      "success_criteria": "",
+      "start_path": "/write",
+      "target": "baseline",
+      "verdict": "ACHIEVED: fine",
+      "achieved": true,
+      "crashed": false,
+      "steps": 5,
+      "tokens": 100,
+      "seconds": 10,
+      "guard_blocked": [],
+      "server_errors": []
+    },
+    {
+      "id": 2,
+      "name": "P2",
+      "who": "a tester",
+      "device": "mobile",
+      "patience": "medium",
+      "journey": "write",
+      "goal": "g",
+      "success_criteria": "",
+      "start_path": "/write",
+      "target": "baseline",
+      "verdict": "ACHIEVED: fine",
+      "achieved": true,
+      "crashed": false,
+      "steps": 5,
+      "tokens": 100,
+      "seconds": 10,
+      "guard_blocked": [],
+      "server_errors": []
+    }
+  ],
+  "raw_issues": [
+    {
+      "target": "preview",
+      "persona": "P1",
+      "persona_id": 1,
+      "journey": "write",
+      "device": "desktop",
+      "severity": "blocker",
+      "category": "ux",
+      "title": "Save button hidden behind cookie bar",
+      "detail": "Clicked it.",
+      "url": "https://app.example.com/write",
+      "screenshot": "shots/preview-1-1.png"
+    },
+    {
+      "target": "preview",
+      "persona": "P2",
+      "persona_id": 2,
+      "journey": "write",
+      "device": "desktop",
+      "severity": "minor",
+      "category": "copy",
+      "title": "Placeholder says Lorem ipsum",
+      "detail": "Clicked it.",
+      "url": "https://app.example.com/write",
+      "screenshot": "shots/preview-2-1.png"
+    },
+    {
+      "target": "baseline",
+      "persona": "P1",
+      "persona_id": 1,
+      "journey": "write",
+      "device": "desktop",
+      "severity": "major",
+      "category": "copy",
+      "title": "Button does nothing",
+      "detail": "Clicked it.",
+      "url": "https://app.example.com/write",
+      "screenshot": "shots/baseline-1-1.png"
+    }
+  ],
+  "merge": {
+    "issues": [
+      {
+        "severity": "blocker",
+        "category": "ux",
+        "title": "Save button hidden behind cookie bar",
+        "detail": "The cookie bar covers Save on both devices. Move it below the fold.",
+        "source_ids": [
+          0
+        ]
+      }
+    ],
+    "dropped": [
+      {
+        "id": 1,
+        "reason": "copy nit already tracked"
+      }
+    ]
+  }
+}

@@ -1,0 +1,46 @@
+# .github/workflows/swarm-persona.yml: run on every successful preview deployment of a PR.
+#
+# Security posture:
+# - The config (and with it the guard policy) comes from the default branch, never the PR head,
+#   so a PR cannot loosen the guard it is tested behind.
+# - Pull requests from forks are skipped: the run holds model credentials and a test session.
+name: swarm-persona
+on:
+  deployment_status:
+permissions:
+  contents: read
+  pull-requests: write
+  deployments: read
+concurrency:
+  group: swarm-persona-${{ github.event.deployment.sha }}
+  cancel-in-progress: true
+jobs:
+  swarm:
+    if: github.event.deployment_status.state == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Find the PR for this deployment
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.deployment.sha }}
+        run: |
+          pr=$(gh api "repos/${GITHUB_REPOSITORY}/commits/$SHA/pulls" \
+            --jq '[.[] | select(.state == "open" and .head.repo.full_name == env.GITHUB_REPOSITORY)][0].number // empty')
+          echo "number=$pr" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        if: steps.pr.outputs.number != ''
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: Abhinav-ranish/swarm-persona@v0.1.0   # pin a full commit SHA in production
+        if: steps.pr.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # The model provider's credentials. For Bedrock, configure AWS credentials instead
+          # (aws-actions/configure-aws-credentials with an OIDC role).
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          config: swarm-persona.yml
+          pr: ${{ steps.pr.outputs.number }}
+          url: ${{ github.event.deployment_status.environment_url }}

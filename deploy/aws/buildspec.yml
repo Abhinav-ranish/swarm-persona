@@ -1,0 +1,37 @@
+# CodeBuild spec for swarm-persona. run.sh zips this file with the app's config, pr.json and any
+# helper files (an auth script) and starts a build with these environment overrides:
+#   SP_REF      the swarm-persona commit to install (a full SHA: tags can move)
+#   SP_CONFIG   the config file name inside the zip
+#   SP_PR       the PR number (context only; posting happens on the caller's side)
+#   SP_URL      optional: the preview URL, overriding app.url
+#   SP_ARGS     optional extra `swarm-persona run` flags (--no-baseline, --no-model-selection)
+version: 0.2
+env:
+  variables:
+    SWARM_PERSONA_NO_SANDBOX: "1"   # CodeBuild runs as root in a container
+    ANONYMIZED_TELEMETRY: "false"
+phases:
+  install:
+    commands:
+      - python3 -m pip install -q --user uv==0.12.15
+      - export PATH="$HOME/.local/bin:$PATH"
+      - case "$SP_REF" in *[!0-9a-f]*|'') echo "SP_REF must be a full commit SHA" >&2; exit 1 ;; esac
+      - '[ ${#SP_REF} -eq 40 ] || { echo "SP_REF must be a 40-character SHA" >&2; exit 1; }'
+      - uv tool install -q --python 3.12 "swarm-persona[bedrock] @ git+https://github.com/Abhinav-ranish/swarm-persona@$SP_REF" > /tmp/sp-install.log 2>&1 || (tail -40 /tmp/sp-install.log; exit 1)
+      - uv tool install -q --python 3.12 mitmproxy==11.1.3 > /tmp/mitm-install.log 2>&1 || (tail -40 /tmp/mitm-install.log; exit 1)
+      # The browser build that matches the Playwright inside the swarm-persona install.
+      - '"$(uv tool dir)/swarm-persona/bin/python" -m playwright install --with-deps chromium > /tmp/pw-install.log 2>&1 || (tail -40 /tmp/pw-install.log; exit 1)'
+  build:
+    commands:
+      - export PATH="$HOME/.local/bin:$PATH"
+      - mkdir -p out
+      # 40 minutes, then SIGTERM: swarm-persona unwinds, stops its proxies and runs the auth
+      # sign-out command; the project's 60-minute limit leaves room for that.
+      - >-
+        set -f; SWARM_PERSONA_MITMDUMP="$(uv tool dir --bin)/mitmdump" timeout --kill-after=120 40m
+        swarm-persona run --config "$SP_CONFIG" --out out --pr "$SP_PR" --pr-context pr.json
+        ${SP_URL:+--url "$SP_URL"} $SP_ARGS --no-gate
+artifacts:
+  base-directory: out
+  files:
+    - '**/*'

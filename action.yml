@@ -1,0 +1,82 @@
+name: swarm-persona
+description: Simulated users walk your preview deploy behind a network write guard and post a ranked UX report on the PR.
+branding:
+  icon: users
+  color: blue
+inputs:
+  config:
+    description: Path to swarm-persona.yml. Read it from a trusted checkout (your default branch), never the PR head.
+    required: true
+  pr:
+    description: PR number to plan for and comment on.
+    required: true
+  url:
+    description: Preview URL, overriding app.url.
+    required: false
+  comment:
+    description: Create or update the sticky PR comment.
+    default: 'true'
+  fail:
+    description: Fail the step when a new finding hits report.fail_on.
+    default: 'true'
+  evidence-retention-days:
+    description: Days to keep the screenshots and evidence artifact. Signed-in screenshots are readable by anyone on a public repository.
+    default: '1'
+  extra-args:
+    description: More `swarm-persona run` flags, such as --no-baseline.
+    default: ''
+outputs:
+  passed:
+    description: '"true" when nothing new hit the gate.'
+    value: ${{ steps.run.outputs.passed }}
+  report:
+    description: Path to report.md.
+    value: ${{ steps.run.outputs.report }}
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      shell: bash
+      run: |
+        pipx install -q uv==0.12.15  # PyPI over TLS, version-pinned; Ubuntu 24.04 refuses pip --user
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+    - name: Install swarm-persona, mitmproxy and Chromium
+      shell: bash
+      run: |
+        uv tool install -q --python 3.12 "${GITHUB_ACTION_PATH}[bedrock]"
+        uv tool install -q --python 3.12 mitmproxy==11.1.3
+        "$(uv tool dir)/swarm-persona/bin/python" -m playwright install --with-deps chromium
+    - name: Run
+      id: run
+      shell: bash
+      env:
+        SP_CONFIG: ${{ inputs.config }}
+        SP_PR: ${{ inputs.pr }}
+        SP_URL: ${{ inputs.url }}
+        SP_COMMENT: ${{ inputs.comment }}
+        SP_FAIL: ${{ inputs.fail }}
+        SP_ARGS: ${{ inputs.extra-args }}
+        ANONYMIZED_TELEMETRY: 'false'
+      run: |
+        set -f
+        case "$SP_PR" in ''|*[!0-9]*) echo "pr must be a number" >&2; exit 2 ;; esac
+        case "$SP_ARGS" in *[!a-z\ -]*) echo "extra-args may only hold flags" >&2; exit 2 ;; esac
+        out="$RUNNER_TEMP/swarm-persona"
+        gh pr view "$SP_PR" --json title,body,files > "$RUNNER_TEMP/pr.json"
+        flags=(--config "$SP_CONFIG" --out "$out" --pr "$SP_PR" --pr-context "$RUNNER_TEMP/pr.json" --no-gate)
+        [ -n "$SP_URL" ] && flags+=(--url "$SP_URL")
+        [ "$SP_COMMENT" = true ] && flags+=(--comment)
+        SWARM_PERSONA_MITMDUMP="$(uv tool dir --bin)/mitmdump" swarm-persona run "${flags[@]}" $SP_ARGS
+        passed=$(python3 -c 'import json,sys; print(str(json.load(open(sys.argv[1]))["passed"]).lower())' "$out/report.json")
+        echo "passed=$passed" >> "$GITHUB_OUTPUT"
+        echo "report=$out/report.md" >> "$GITHUB_OUTPUT"
+        if [ "$SP_FAIL" = true ] && [ "$passed" != true ]; then exit 1; fi
+    - name: Keep the evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: swarm-persona
+        path: ${{ runner.temp }}/swarm-persona
+        if-no-files-found: ignore
+        # Signed-in screenshots: on a public repository any GitHub user can download artifacts.
+        retention-days: ${{ inputs.evidence-retention-days }}

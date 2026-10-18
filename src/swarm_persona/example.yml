@@ -1,0 +1,78 @@
+# swarm-persona.yml: everything specific to your app. Validate with:
+#   swarm-persona check-config --config swarm-persona.yml
+
+app:
+  name: Acme Notes
+  description: >-
+    A note-taking web app for small teams: write notes, organise them into folders, and share a
+    read-only link.
+  url: https://preview.acme-notes.example     # the build under test; --url overrides it per run
+  baseline_url: https://acme-notes.example    # production: the oracle. Leave out if you have none.
+  hosts: [www.acme-notes.example]             # every other host that serves the app
+  routes: ["/", "/notes"]                     # start paths when no journey applies
+
+# The network guard. Every browser request is judged here, failing closed. Reads are allowed;
+# a write (POST, PUT, PATCH, DELETE) must match allowed_writes, and its JSON or form body must not
+# set a forbidden key. Keys match whatever their case or separators (sharedAt == shared_at).
+guard:
+  denied_paths:            # refused for every method, GETs included: routes that act when opened
+    - ^/api/billing(/|$)
+    - ^/api/integrations/
+    - ^/invite/
+  allowed_writes:          # the only writes allowed: list exact paths, anchored
+    - ^/api/notes$
+    - ^/api/notes/[0-9a-f-]{36}$
+    - ^/api/auth/refresh$
+  forbidden_body_keys: [shared_at, publish_at, recipients]
+  forbidden_body_values:
+    visibility: [public]
+  json_only_paths: [^/api/notes]
+  self_test:               # requests the guard must refuse before any browser starts
+    - {method: GET, path: /invite/selftest}
+
+# Sign-in. A command that writes a Playwright storage state to {state} (and may keep tokens in
+# {tokens} for the sign-out command). Or point storage_state at a file you made yourself.
+auth:
+  command: python scripts/qa_login.py --base-url {url} --out {state} --tokens {tokens}
+  sign_out_command: python scripts/qa_login.py --base-url {url} --out {state} --tokens {tokens} --sign-out
+
+# GETs that must pass before any browser starts. Each fails closed on an HTTP error, a reply that
+# is not a JSON object, or a missing key.
+preflight:
+  - path: /api/integrations
+    message: the QA workspace has a connected integration; disconnect it first
+    require_keys: [connected]
+    fail_if_nonempty: [connected]
+
+# Journeys: what a persona tries, and which files own it. A PR touching only unowned files runs
+# nothing; one touching a shared file runs every journey.
+journeys:
+  - name: write-a-note
+    goal: Create a new note titled "Standup" with three bullet points and find it again in the list.
+    start_path: /notes
+    success_criteria: the note appears in the list with its title
+    owns: ["src/app/notes/**", "src/components/editor/**"]
+    critical_selectors: ["button:has-text('New note')"]
+    devices: [desktop, mobile]
+shared: ["src/app/layout.tsx", "middleware.ts", "package-lock.json", "**/globals.css"]
+
+personas:
+  count: 4
+  max_steps: 25
+  concurrency: 3
+
+llm:
+  provider: bedrock          # bedrock | anthropic | openai (any OpenAI-compatible base_url)
+  model: us.moonshotai.kimi-k3
+  region: us-east-2
+
+budget:
+  max_personas: 8
+  max_total_steps: 400
+  max_tokens: 4000000
+  timeout_minutes: 30
+
+report:
+  title: Persona swarm
+  fail_on: [blocker]
+  fail_on_unclassified: false
