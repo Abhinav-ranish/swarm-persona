@@ -180,3 +180,33 @@ def test_a_url_override_must_be_a_bare_https_origin(tmp_path):
     for url in ['http://preview.example.com', 'https://preview.example.com/path']:
         with pytest.raises(ValueError):
             asyncio.run(run(cfg(), out=tmp_path, url=url))
+
+
+def test_custom_actions_register_with_browser_use():
+    """String annotations once made every persona crash before its agent ran."""
+    pytest.importorskip('browser_use')
+    import asyncio
+
+    import browser_use
+
+    from swarm_persona import agent
+
+    class Proxy:
+        server = 'http://127.0.0.1:1'
+
+        def records(self, which):
+            return []
+
+    async def stub(self, max_steps):
+        raise RuntimeError('agent loop reached')
+
+    original = browser_use.Agent.run
+    browser_use.Agent.run = stub
+    try:
+        persona = {'id': 1, 'name': 'P', 'who': 'x', 'device': 'desktop', 'patience': 'low', 'journey': 'j',
+                   'goal': 'g', 'success_criteria': '', 'start_path': '/'}
+        result = asyncio.run(agent.run_persona(cfg(), {'title': 't'}, persona, 'preview',
+                                               'https://preview.example.com', Proxy(), None, Path('.')))
+    finally:
+        browser_use.Agent.run = original
+    assert 'agent loop reached' in result['verdict']

@@ -1,6 +1,8 @@
-"""One persona: a browser-use agent with vision, driving its own browser through its own guard proxy."""
+"""One persona: a browser-use agent with vision, driving its own browser through its own guard proxy.
 
-from __future__ import annotations
+No `from __future__ import annotations` here: browser-use reads the custom actions' annotations as
+real types to inject browser_session, and string annotations make every action fail to register.
+"""
 
 import os
 import re

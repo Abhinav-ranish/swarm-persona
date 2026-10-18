@@ -102,7 +102,21 @@ async def walk(cfg: Config, ctx: dict, personas: list[dict], label: str, origin:
         notes.append(f'Timeout: {len(pending)} persona run(s) on {label} were cut off at '
                      f'{cfg.budget.timeout_minutes} minutes.')
         await asyncio.gather(*pending, return_exceptions=True)
-    return [r for t in tasks if t in done and not t.exception() and (r := t.result())]
+    results = []
+    for persona, task in zip(personas, tasks):
+        if task not in done:
+            continue
+        if task.exception():  # a persona that broke before its agent ran is reported, never dropped
+            error = task.exception()
+            print(f"  [{label}] {persona['name']} failed: {type(error).__name__}: {error}", flush=True)
+            results.append({**persona, 'target': label, 'verdict': f'CRASHED: {type(error).__name__}: {str(error)[:200]}',
+                            'achieved': False, 'crashed': True, 'steps': 0, 'tokens': 0, 'seconds': 0,
+                            'issues': [], 'guard_blocked': [], 'server_errors': []})
+        elif task.result():
+            results.append(task.result())
+    if personas and results and all(r['crashed'] for r in results):
+        notes.append(f'Every persona on {label} crashed; nothing was walked. See the Sessions table.')
+    return results
 
 
 async def run(cfg: Config, *, out: Path, pr: str | None = None, pr_context_file: str | None = None,
