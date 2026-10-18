@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import shutil
 import signal
 import sys
@@ -17,8 +18,8 @@ from .config import load
 
 
 def cmd_run(args) -> int:
-    from .github import step_summary, upsert_comment
-    from .run import run
+    from .github import step_summary
+    from .run import publish, run
 
     cfg = load(args.config)
     result = asyncio.run(run(cfg, out=Path(args.out), pr=args.pr, pr_context_file=args.pr_context, url=args.url,
@@ -28,7 +29,7 @@ def cmd_run(args) -> int:
     if args.comment:
         if not args.pr:
             sys.exit('--comment needs --pr')
-        print(f'Comment: {upsert_comment(args.pr, result["report"])}')
+        print(f'Comment: {publish(Path(args.out), args.pr, app_file=os.environ.get("SWARM_PERSONA_GITHUB_APP"))}')
     print(f"\nWrote {Path(args.out) / 'report.md'}: {'passed' if result['passed'] else 'FAILED the gate'}")
     return 0 if result['passed'] or args.no_gate else 1
 
@@ -39,6 +40,14 @@ def cmd_replay(args) -> int:
     result = replay(Path(args.out), args.fail_on, args.fail_on_unclassified or None)
     print(result['report'])
     return 0 if result['passed'] else 1
+
+
+def cmd_publish(args) -> int:
+    from .run import publish
+
+    print(publish(Path(args.out), args.pr, args.repo, args.images_repo,
+                  args.github_app or os.environ.get('SWARM_PERSONA_GITHUB_APP')))
+    return 0
 
 
 def cmd_select(args) -> int:
@@ -110,6 +119,14 @@ def main(argv: list[str] | None = None) -> None:
     rp.add_argument('--fail-on', nargs='+', choices=['blocker', 'major', 'minor', 'polish'])
     rp.add_argument('--fail-on-unclassified', action='store_true')
     rp.set_defaults(func=cmd_replay)
+
+    pb = sub.add_parser('publish', help='post OUT as the sticky PR comment, screenshots embedded')
+    pb.add_argument('out')
+    pb.add_argument('--pr', required=True)
+    pb.add_argument('--repo', help='owner/name of the PR (default: this checkout or $GITHUB_REPOSITORY)')
+    pb.add_argument('--images-repo', help='owner/name to commit screenshots to (default: report.images_repo)')
+    pb.add_argument('--github-app', help='JSON file {app_id, installation_id, private_key}: comment as the app')
+    pb.set_defaults(func=cmd_publish)
 
     s = sub.add_parser('select', help='which journeys a change selects (globs only, no model)')
     s.add_argument('--config', required=True)

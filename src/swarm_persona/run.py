@@ -12,6 +12,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import time
 from contextlib import ExitStack
 from pathlib import Path
 
@@ -139,6 +140,8 @@ async def run(cfg: Config, *, out: Path, pr: str | None = None, pr_context_file:
     meta = {'title': cfg.report.title, 'pr': pr, 'url': preview_url, 'baseline_url': cfg.app.baseline_url,
             'app_hosts': sorted(cfg.app_hosts(preview_url)),
             'model': f'{cfg.llm.provider}:{cfg.llm.model}', 'version': __version__,
+            'run_id': time.strftime('%Y%m%d-%H%M%S') + '-' + os.urandom(3).hex(),
+            'images_repo': cfg.report.images_repo,
             'fail_on': cfg.report.fail_on, 'fail_on_unclassified': cfg.report.fail_on_unclassified,
             'no_em_dashes': cfg.report.no_em_dashes, 'notes': []}
     notes, spent = meta['notes'], {'tokens': 0}
@@ -204,13 +207,14 @@ def finish(cfg: Config, out: Path, evidence: dict) -> dict:
     return report_from(cfg.report.fail_on, cfg.report.fail_on_unclassified, cfg.report.no_em_dashes, out, evidence)
 
 
-def report_from(fail_on: list[str], fail_unclassified: bool, no_em_dashes: bool, out: Path, evidence: dict) -> dict:
+def report_from(fail_on: list[str], fail_unclassified: bool, no_em_dashes: bool, out: Path, evidence: dict,
+                images: dict[str, str] | None = None) -> dict:
     verdict = judge(evidence, fail_on, fail_unclassified)
     preview_raw = [i for i in evidence['raw_issues'] if i['target'] == 'preview']
     dropped = [{**d, 'title': preview_raw[d['id']]['title']} for d in (evidence.get('merge') or {}).get('dropped', [])
                if d['id'] < len(preview_raw)]
     meta = evidence['meta']
-    text = render(meta, verdict, evidence['sessions'], evidence['checks'], dropped, no_em_dashes)
+    text = render(meta, verdict, evidence['sessions'], evidence['checks'], dropped, no_em_dashes, images)
     write(out, text, {'version': meta.get('version'), 'meta': meta, **verdict})
     return {'report': text, **verdict}
 
@@ -222,3 +226,28 @@ def replay(out: Path, fail_on: list[str] | None = None, fail_unclassified: bool 
     if fail_unclassified is None:
         fail_unclassified = bool(meta.get('fail_on_unclassified'))
     return report_from(fail_on or meta['fail_on'], fail_unclassified, bool(meta.get('no_em_dashes')), out, evidence)
+
+
+def publish(out: Path, pr: str, repo: str | None = None, images_repo: str | None = None,
+            app_file: str | None = None) -> str:
+    """Upload the run's screenshots (when an images repository is set), rebuild the report with
+    them embedded, and create or update the sticky PR comment. No browser, no model."""
+    import hashlib
+
+    from .github import Client, repo_name, upload_images, upsert_comment
+
+    evidence = json.loads((out / 'evidence.json').read_text())
+    meta = evidence['meta']
+    repo = repo or repo_name()
+    images_repo = images_repo or meta.get('images_repo')
+    images = {}
+    if images_repo:
+        run_id = meta.get('run_id') or hashlib.sha256((out / 'evidence.json').read_bytes()).hexdigest()[:16]
+        wanted = {Path(s).name for f in evidence['raw_issues'] for s in [f.get('screenshot')] if s}
+        wanted |= {Path(c['screenshot']).name for c in evidence['checks'] if c.get('screenshot')}
+        files = sorted(p for p in (out / 'shots').glob('*.png') if p.name in wanted)[:40]
+        images = upload_images(Client.from_cli(), images_repo, files, f"{repo.replace('/', '-')}/pr-{pr}/{run_id}")
+    result = report_from(meta['fail_on'], bool(meta.get('fail_on_unclassified')), bool(meta.get('no_em_dashes')),
+                         out, evidence, images)
+    client = Client.from_app(json.loads(Path(app_file).read_text()), repo) if app_file else Client.from_cli()
+    return upsert_comment(client, repo, pr, result['report'])

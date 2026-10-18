@@ -81,14 +81,10 @@ fi
 [ -s "$OUT/report.md" ] && [ -s "$OUT/report.json" ] || { echo "Build passed but the report was not downloaded; see $ART" >&2; exit 1; }
 echo "Report: $OUT/report.md (screenshots: $OUT/shots, also $ART/shots)"
 if [ "$POST" = 1 ]; then
-  REPO=$(gh repo view --json nameWithOwner --jq .nameWithOwner)
-  ME=$(gh api user --jq .login)  # anyone can paste the marker: edit only our own comment
-  ID=$(gh api --paginate "repos/$REPO/issues/$PR/comments" \
-    --jq ".[] | select(.user.login == \"$ME\" and (.body | contains(\"<!-- swarm-persona -->\"))) | .id" | head -1)
-  if [ -n "$ID" ]; then
-    gh api -X PATCH "repos/$REPO/issues/comments/$ID" -F "body=@$OUT/report.md" --jq .html_url
-  else
-    gh api -X POST "repos/$REPO/issues/$PR/comments" -F "body=@$OUT/report.md" --jq .html_url
-  fi
+  # The comment is built here from the downloaded evidence: screenshots go to report.images_repo
+  # with your gh login, and the comment is posted as the GitHub App in $SP_GITHUB_APP (a JSON file
+  # with app_id, installation_id, private_key) when set, else as you.
+  uvx -q --python 3.12 --from "swarm-persona @ git+https://github.com/Abhinav-ranish/swarm-persona@$REF" \
+    swarm-persona publish "$OUT" --pr "$PR" ${SP_GITHUB_APP:+--github-app "$SP_GITHUB_APP"}
 fi
 python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1]))["passed"] else 1)' "$OUT/report.json"

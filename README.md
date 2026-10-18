@@ -107,6 +107,14 @@ screenshots) and `guard/` (each proxy's refusals and observed 5xx).
 model: change the rules or `--fail-on` and see the new verdict for free. The test suite runs on
 recorded evidence the same way.
 
+The PR comment starts with a one-line gate, persona and findings table and a findings table; each
+finding's detail and screenshots, the sessions, the entry checks and the guard log are folded below.
+Set `report.images_repo` (a repository you create for this; private keeps them private) and
+screenshots are committed there, one commit per run, and embedded in the comment pinned to that
+commit. Post as a GitHub App instead of yourself with `--github-app app.json` (or
+`SWARM_PERSONA_GITHUB_APP`): `{app_id, installation_id, private_key}`, needing only Pull requests
+write. `swarm-persona publish out/ --pr 123` does all of this for a finished run.
+
 The PR comment is a single comment, found by a hidden marker and its author (the account running
 swarm-persona; anyone can paste the marker), and edited in place on every run. Text from pages and
 models is defanged before it lands there: no @mentions, issue cross-references, links, autolinks,

@@ -155,6 +155,14 @@ class Report(Strict):
     fail_on: list[Severity] = Field(default_factory=lambda: ['blocker'])
     fail_on_unclassified: bool = Field(False, description='Gate on findings when no baseline ran.')
     no_em_dashes: bool = False
+    images_repo: str | None = Field(None, description='owner/name to commit screenshots to so the comment shows them.')
+
+    @field_validator('images_repo')
+    @classmethod
+    def _images_repo(cls, v: str | None) -> str | None:
+        if v and not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', v):
+            raise ValueError(f'images_repo must be owner/name, got {v!r}')
+        return v
 
 
 class Config(Strict):

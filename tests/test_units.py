@@ -111,7 +111,7 @@ def test_replay_rebuilds_the_report_from_the_fixture_alone(tmp_path):
     (tmp_path / 'evidence.json').write_text(fixture.read_text())
     result = replay(tmp_path)
     report = (tmp_path / 'report.md').read_text()
-    assert report.startswith(MARKER) and '### New' in report and '### Pre-existing' in report
+    assert report.startswith(MARKER) and '| new |' in report and '| pre-existing |' in report
     assert not result['passed']
     assert json.loads((tmp_path / 'report.json').read_text())['gating'] == result['gating']
     assert replay(tmp_path, ['polish'])['passed'] is True
