@@ -42,7 +42,13 @@ class Session:
 
     def __enter__(self) -> 'Session':
         if self.cfg.auth.command:
-            self.command(self.cfg.auth.command)
+            try:
+                self.command(self.cfg.auth.command)
+            except BaseException:
+                # The command may have opened a session before failing; a with-block whose
+                # __enter__ raises never reaches __exit__, so sign out here.
+                self.__exit__()
+                raise
             self.path = self.vars['state']
         elif self.cfg.auth.storage_state:
             self.path = str(Path(self.cfg.auth.storage_state).expanduser())

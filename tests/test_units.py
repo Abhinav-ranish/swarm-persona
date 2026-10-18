@@ -223,3 +223,23 @@ def test_guard_refusals_are_grouped_and_other_sites_counted():
     assert 'POST /cdn-cgi/rum (write outside the allowlist, 2 personas)' in text
     assert '2 request(s) to other sites' in text and 'google' not in text
     assert guard_lines([{'name': 'A', 'guard_blocked': []}], ['app.example.com']) == []
+
+
+def test_a_failing_auth_command_still_runs_sign_out(tmp_path, monkeypatch):
+    import subprocess
+
+    from swarm_persona import run as run_mod
+
+    calls = []
+
+    def fake(argv, check):
+        calls.append(argv[0])
+        if argv[0] == 'login':
+            raise subprocess.CalledProcessError(1, argv)
+
+    monkeypatch.setattr(run_mod.subprocess, 'run', fake)
+    c = cfg(auth={'command': 'login {state}', 'sign_out_command': 'logout {state}'})
+    with pytest.raises(subprocess.CalledProcessError):
+        with run_mod.Session(c, 'https://preview.example.com', tmp_path, 'preview'):
+            pass
+    assert calls == ['login', 'logout']
