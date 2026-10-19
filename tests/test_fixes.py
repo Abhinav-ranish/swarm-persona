@@ -27,11 +27,11 @@ diff --git a/src/billing/pay.ts b/src/billing/pay.ts
 """
 
 
-def cfg(**report) -> Config:
+def cfg(max_tokens=1000, **report) -> Config:
     return Config.model_validate({
         'app': {'name': 'A', 'description': 'd', 'url': 'https://preview.example.com'},
         'journeys': [{'name': 'write', 'goal': 'Write.', 'owns': ['src/app/write/**', 'config/**']}],
-        'report': {'suggest_fixes': True, 'fix_max_tokens': 500, **report}, 'budget': {'max_tokens': 1000}})
+        'report': {'suggest_fixes': True, 'fix_max_tokens': 500, **report}, 'budget': {'max_tokens': max_tokens}})
 
 
 def fake_llm(monkeypatch, reply=None):
@@ -84,9 +84,12 @@ def test_no_diff_disabled_or_spent_budget_means_no_call(monkeypatch):
     assert asyncio.run(fixes.suggest(cfg(), findings(), '', {'tokens': 0}, [])) == {}
     assert asyncio.run(fixes.suggest(cfg(suggest_fixes=False), findings(), DIFF, {'tokens': 0}, [])) == {}
     notes = []
-    assert asyncio.run(fixes.suggest(cfg(), findings(), DIFF, {'tokens': 501}, notes)) == {}  # 501 + 500 > 1000
+    [blocker] = [f for f in findings() if f['severity'] == 'blocker']
+    text, _ = fixes.owned_diff(fixes.split_diff(DIFF), ['src/app/write/**', 'config/**'], 12000)
+    room = 1000 - 500 - len(fixes.prompt(blocker, text)) // 3  # reply cap and prompt are reserved
+    assert asyncio.run(fixes.suggest(cfg(), findings(), DIFF, {'tokens': room + 1}, notes)) == {}
     assert calls == [] and notes == ['Budget: possible fixes stopped, budget.max_tokens would be exceeded.']
-    assert asyncio.run(fixes.suggest(cfg(), findings(), DIFF, {'tokens': 500}, [])) and len(calls) == 1
+    assert asyncio.run(fixes.suggest(cfg(), findings(), DIFF, {'tokens': room}, [])) and len(calls) == 1
 
 
 def test_a_file_outside_the_owned_diff_is_dropped_and_an_empty_change_is_no_fix():
@@ -166,7 +169,7 @@ def test_the_cap_counts_attempts_not_successes(monkeypatch):
     notes = []
     majors = many_majors()
     assert len(majors) > fixes.MAX_SUGGESTIONS
-    assert asyncio.run(fixes.suggest(cfg(), majors, DIFF, {'tokens': 0}, notes)) == {}
+    assert asyncio.run(fixes.suggest(cfg(100_000), majors, DIFF, {'tokens': 0}, notes)) == {}
     assert len(calls) == fixes.MAX_SUGGESTIONS
     assert notes == [f'Possible fixes stopped at the cap of {fixes.MAX_SUGGESTIONS} calls per run.']
 

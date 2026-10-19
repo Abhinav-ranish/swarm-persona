@@ -101,7 +101,7 @@ def parse(text: str, paths: list[str]) -> dict | None:
 
 async def suggest(cfg: Config, findings: list[dict], diff: str, spent: dict, notes: list[str]) -> dict[str, dict]:
     """{finding key: {file, change}}. Each call's tokens count toward budget.max_tokens, and
-    a call starts only when its whole reply cap still fits. One failed call skips that finding only."""
+    a call starts only when its whole reply cap and its prompt (about 3 characters a token) still fit. One failed call skips that finding only."""
     if not cfg.report.suggest_fixes or not diff.strip():
         return {}
     files, journeys = split_diff(diff), {j.name: j for j in cfg.journeys}
@@ -117,12 +117,13 @@ async def suggest(cfg: Config, findings: list[dict], diff: str, spent: dict, not
         if len(tried) >= MAX_SUGGESTIONS:
             notes.append(f'Possible fixes stopped at the cap of {MAX_SUGGESTIONS} calls per run.')
             break
-        if spent['tokens'] + cfg.report.fix_max_tokens > cfg.budget.max_tokens:
+        ask = prompt(finding, text)
+        if spent['tokens'] + cfg.report.fix_max_tokens + len(ask) // 3 > cfg.budget.max_tokens:  # reply cap + prompt
             notes.append('Budget: possible fixes stopped, budget.max_tokens would be exceeded.')
             break
         tried.add(finding['key'])
         try:
-            reply, tokens = await complete(cfg.llm, prompt(finding, text), max_tokens=cfg.report.fix_max_tokens)
+            reply, tokens = await complete(cfg.llm, ask, max_tokens=cfg.report.fix_max_tokens)
         except (Exception, SystemExit) as error:  # a missing API key raises SystemExit
             notes.append(f"No possible fix for finding {finding.get('id', '?')}: {type(error).__name__}.")
             continue
