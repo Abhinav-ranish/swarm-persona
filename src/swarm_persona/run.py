@@ -41,11 +41,14 @@ class Session:
         argv = [re.sub(r'\{(url|state|tokens)\}', lambda m: self.vars[m.group(1)], part)
                 for part in shlex.split(template)]
         log = os.environ.get('SWARM_PERSONA_AUTH_LOG')  # set by the MCP server: keep it out of run.log
-        if not log:
-            subprocess.run(argv, check=True)
-            return
-        with os.fdopen(os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), 'ab') as out:
-            subprocess.run(argv, check=True, stdout=out, stderr=out)
+        try:
+            if not log:
+                subprocess.run(argv, check=True)
+                return
+            with os.fdopen(os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), 'ab') as out:
+                subprocess.run(argv, check=True, stdout=out, stderr=out)
+        except subprocess.CalledProcessError as error:  # its arguments may hold credentials: name the program only
+            raise subprocess.CalledProcessError(error.returncode, argv[0]) from None
 
     def __enter__(self) -> 'Session':
         if self.cfg.auth.command:

@@ -150,6 +150,9 @@ def test_the_auth_log_is_private_and_the_auth_command_writes_there(home, tmp_pat
     c = Config.model_validate({'app': {'name': 'A', 'description': 'd', 'url': 'https://p.example.com'}})
     run_mod.Session(c, 'https://p.example.com', tmp_path, 'preview').command('echo signed-in-token-abc')
     assert 'signed-in-token-abc' in log.read_text()
+    with pytest.raises(subprocess.CalledProcessError) as error:
+        run_mod.Session(c, 'https://p.example.com', tmp_path, 'preview').command('sh -c "exit 3" --password=pw-abc')
+    assert 'pw-abc' not in str(error.value) and error.value.returncode == 3
 
 
 def test_a_run_from_before_a_restart_is_judged_by_its_pid(home, monkeypatch):
