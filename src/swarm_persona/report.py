@@ -55,7 +55,6 @@ def render(meta: dict, verdict: dict, sessions: list[dict], checks: list[dict], 
         return '\n'.join(lines)
     walked = [s for s in sessions if s['target'] == 'preview']
     verdicts = verdict.get('personas') or []
-    results = {v['target'] + str(v['id']): v for v in verdicts}
     preview = [v for v in verdicts if v['target'] == 'preview']
     gate = 'Passed' if verdict['passed'] else f"**Failed** ({len(verdict['gating'])} new at {'/'.join(meta['fail_on'])})"
     tally = ', '.join(f"{sum(1 for v in preview if v['result'] == r)} {r}" for r in ('pass', 'partial', 'fail'))
@@ -101,8 +100,8 @@ def render(meta: dict, verdict: dict, sessions: list[dict], checks: list[dict], 
     if walked or sessions:
         lines += [f'<details><summary>Sessions ({len(sessions)})</summary>', '',
                   '| Target | Persona | Device | Goal | Result | Said | Steps |', '|---|---|---|---|---|---|---|']
-        for s in sessions:
-            v = results.get(s['target'] + str(s.get('id')))
+        for n, s in enumerate(sessions):  # verdicts are built from these sessions, in this order
+            v = verdicts[n] if n < len(verdicts) else None
             lines.append(f"| {s['target']} | {safe(s['name'], 40)}: {safe(s['who'], 160)} | {s['device']} | "
                          f"{safe(s['goal'], 200)} | {result_text(v) if v else '-'} | {safe(s['verdict'], 300)} | "
                          f"{s['steps']} |")

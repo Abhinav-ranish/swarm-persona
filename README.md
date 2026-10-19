@@ -122,10 +122,14 @@ decided from the evidence, in this order:
 | Evidence | Verdict |
 |---|---|
 | The persona crashed | fail |
-| It finished and marked the goal met (browser-use's done action, `success: true`) | pass; partial if a hard signal fired on its journey and device, or its own verdict says it gave up |
+| It finished and marked the goal met (browser-use's done action, `success: true`) | pass; partial if the app answered 5xx during its own walk, or its own verdict says it gave up |
 | It finished and marked the goal not met | fail |
 | It ran out of `max_steps` without finishing | fail |
-| None of the above | its own ACHIEVED / GAVE UP verdict, labelled **self-report** (partial when a hard signal fired) |
+| None of the above | its own ACHIEVED / GAVE UP verdict, labelled **self-report** (partial after a 5xx on its walk) |
+
+Only signals from the persona's own walk count against it. Entry checks run in a separate browser,
+and a walk records 5xx answers (through its guard proxy) but not page or console errors, so an entry
+check failure is a finding of its own, not a mark on each persona.
 
 The report opens with a one-line summary ("3/4 personas completed; 2 issues"), shows each preview
 persona's verdict and why, and folds a **Worked well** list: personas return up to three things

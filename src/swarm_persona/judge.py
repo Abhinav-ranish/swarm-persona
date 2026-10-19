@@ -16,7 +16,7 @@ Severity is set by rules, never raised by a model:
   signal fired on the same journey. The merge model's own severity is ignored.
 
 Each persona also gets pass, fail or partial against its journey's success criteria, decided from
-the evidence (crashed, done and marked successful, hit max_steps, hard signals on its walk). Only
+the evidence (crashed, done and marked successful, hit max_steps, a 5xx during its own walk). Only
 when the evidence is silent does the persona's own ACHIEVED / GAVE UP verdict decide, labelled
 self-report.
 """
@@ -187,16 +187,6 @@ def journey_findings(evidence: dict) -> list[dict]:
     return findings
 
 
-def walk_signals(evidence: dict) -> dict[tuple, set[str]]:
-    """Hard signal kinds per (target, journey, device): entry checks and 5xx seen mid-walk."""
-    fired: dict[tuple, set[str]] = defaultdict(set)
-    for c in evidence['checks']:
-        for s in signals(c):
-            if s['kind'] in HARD:
-                fired[(c['target'], c['journey'], c['device'])].add(s['kind'])
-    return fired
-
-
 def outcome(session: dict, fired: list[str], max_steps: int | None) -> tuple[str, str, str]:
     """(pass / fail / partial, evidence / self-report, why) for one persona's walk."""
     if session.get('crashed'):
@@ -220,12 +210,13 @@ def outcome(session: dict, fired: list[str], max_steps: int | None) -> tuple[str
 
 
 def persona_verdicts(evidence: dict) -> list[dict]:
-    fired = walk_signals(evidence)
+    """One per session, in evidence order. Only hard signals from the persona's own walk count: the
+    5xx its guard proxy saw. Entry checks run in a separate browser the persona never used, and the
+    walk records no page or console errors, so those cannot be pinned on a persona."""
     max_steps = evidence['meta'].get('max_steps')
     out = []
     for x in evidence['sessions']:
-        journey = x.get('journey') or x.get('start_path') or '/'
-        kinds = sorted(fired[(x['target'], journey, x['device'])] | ({'server-error'} if x.get('server_errors') else set()))
+        kinds = ['server-error'] if x.get('server_errors') else []
         result, basis, reason = outcome(x, kinds, max_steps)
         out.append({'target': x['target'], 'id': x.get('id'), 'name': x['name'], 'journey': x.get('journey'),
                     'device': x['device'], 'success_criteria': x.get('success_criteria') or '',
