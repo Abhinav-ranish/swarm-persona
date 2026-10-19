@@ -194,7 +194,6 @@ def test_walk_records_personas_cut_off_at_the_timeout(monkeypatch, tmp_path):
     assert judge(ev, ['blocker'])['summary'] == '1/4 personas completed; 3 timed out; 1 issue'  # the 5xx
 
 
-
 def test_agent_reports_stay_unclassified_when_no_baseline_persona_walked():
     def classes(*baseline):
         ev = evidence(checks=[check('preview', status=500), check('baseline')],
