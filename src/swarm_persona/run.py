@@ -47,8 +47,11 @@ class Session:
                 return
             with os.fdopen(os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), 'ab') as out:
                 subprocess.run(argv, check=True, stdout=out, stderr=out)
-        except subprocess.CalledProcessError as error:  # its arguments may hold credentials: name the program only
-            raise subprocess.CalledProcessError(error.returncode, argv[0]) from None
+        # Its arguments and path may hold credentials or a home directory: name the program only.
+        except subprocess.CalledProcessError as error:
+            raise subprocess.CalledProcessError(error.returncode, os.path.basename(argv[0])) from None
+        except OSError as error:
+            raise OSError(error.errno, f'could not start {os.path.basename(argv[0])}: {error.strerror}') from None
 
     def __enter__(self) -> 'Session':
         if self.cfg.auth.command:
@@ -65,13 +68,15 @@ class Session:
         return self
 
     def __exit__(self, *exc) -> None:
-        if self.cfg.auth.sign_out_command:
-            try:
-                self.command(self.cfg.auth.sign_out_command)
-            except subprocess.CalledProcessError as error:
-                print(f'WARNING: sign-out for {self.origin} failed ({error.returncode})', flush=True)
-        for key in ('state', 'tokens'):
-            Path(self.vars[key]).unlink(missing_ok=True)
+        try:
+            if self.cfg.auth.sign_out_command:
+                try:
+                    self.command(self.cfg.auth.sign_out_command)
+                except (subprocess.CalledProcessError, OSError) as error:
+                    print(f'WARNING: sign-out for {self.origin} failed ({error})', flush=True)
+        finally:  # the session files go whatever sign-out did
+            for key in ('state', 'tokens'):
+                Path(self.vars[key]).unlink(missing_ok=True)
 
     def state(self) -> dict | None:
         return json.loads(Path(self.path).read_text()) if self.path else None

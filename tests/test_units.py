@@ -243,3 +243,51 @@ def test_a_failing_auth_command_still_runs_sign_out(tmp_path, monkeypatch):
         with run_mod.Session(c, 'https://preview.example.com', tmp_path, 'preview'):
             pass
     assert calls == ['login', 'logout']
+
+
+@pytest.mark.parametrize('command', ['TOKEN=abc python login.py', '', '   ', 'python "unclosed'])
+def test_auth_commands_must_start_with_a_program(command):
+    with pytest.raises(ValueError):
+        cfg(auth={'command': command})
+    with pytest.raises(ValueError):
+        cfg(auth={'sign_out_command': command})
+    assert cfg(auth={'command': 'python login.py --opt=1'}).auth.command
+
+
+def test_an_auth_program_that_cannot_start_is_named_by_its_basename_only(tmp_path):
+    from swarm_persona import run as run_mod
+
+    session = run_mod.Session(cfg(), 'https://preview.example.com', tmp_path, 'preview')
+    with pytest.raises(OSError) as error:
+        session.command('/no/such/home-alice/secret-login --password=pw-abc')
+    text = str(error.value)
+    assert 'secret-login' in text and 'home-alice' not in text and 'pw-abc' not in text
+
+
+def test_session_files_are_deleted_even_when_sign_out_breaks_unexpectedly(tmp_path, monkeypatch):
+    from swarm_persona import run as run_mod
+
+    c = cfg(auth={'command': 'login {state}', 'sign_out_command': 'logout {state}'})
+    session = run_mod.Session(c, 'https://preview.example.com', tmp_path, 'preview')
+    for key in ('state', 'tokens'):
+        Path(session.vars[key]).write_text('{"cookie": "s"}')
+
+    def broken(template):
+        raise RuntimeError('unexpected')
+
+    monkeypatch.setattr(session, 'command', broken)
+    with pytest.raises(RuntimeError):
+        session.__exit__()
+    assert not any(Path(session.vars[k]).exists() for k in ('state', 'tokens'))
+
+
+def test_a_sign_out_program_that_cannot_start_is_a_warning(tmp_path, capsys):
+    from swarm_persona import run as run_mod
+
+    c = cfg(auth={'sign_out_command': '/no/such/dir/logout --pw=pw-abc'})
+    session = run_mod.Session(c, 'https://preview.example.com', tmp_path, 'preview')
+    Path(session.vars['state']).write_text('{}')
+    session.__exit__()
+    out = capsys.readouterr().out
+    assert 'sign-out for https://preview.example.com failed' in out and 'pw-abc' not in out and '/no/such' not in out
+    assert not Path(session.vars['state']).exists()

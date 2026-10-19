@@ -7,6 +7,7 @@ workspace preflight, sign-in, the journeys and the product description all come 
 from __future__ import annotations
 
 import re
+import shlex
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
@@ -107,6 +108,22 @@ class Auth(Strict):
     command: str | None = Field(None, description='Runs with {url} and {state}; must write the storage state.')
     sign_out_command: str | None = Field(None, description='Runs with {url} and {state} when the run ends.')
     storage_state: str | None = Field(None, description='A storage state file to use as is.')
+
+    @field_validator('command', 'sign_out_command')
+    @classmethod
+    def _program_first(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        try:
+            argv = shlex.split(v)
+        except ValueError as error:
+            raise ValueError(f'auth commands must parse as a shell-style command line ({error})') from None
+        if not argv:
+            raise ValueError('an auth command may not be empty')
+        if '=' in argv[0]:
+            raise ValueError('an auth command must start with the program to run, not a VAR=value assignment: '
+                             'it runs without a shell, so set environment variables in a wrapper script')
+        return v
 
 
 class Preflight(Strict):
