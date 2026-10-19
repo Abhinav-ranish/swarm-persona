@@ -104,7 +104,7 @@ def signal_findings(evidence: dict) -> tuple[list[dict], list[dict]]:
             'title': f"{SIGNAL_TITLES[kind]} ({journey})", 'detail': items[0]['detail'],
             'severity': severity, 'rule': rule, 'paths': sorted({s['path'] for s in items}),
             'classification': classify(any(s['fingerprint'] in base_prints for s in items), baseline_ran),
-            'personas': [], 'screenshots': [],
+            'personas': [], 'screenshots': [], 'fingerprint': '|'.join(['signal', journey, kind, normalize(items[0]['detail'])]),
         })
     prev_prints = {s['fingerprint'] for s in preview}
     improved = [{'kind': s['kind'], 'journey': s['journey'], 'device': s['device'], 'detail': s['detail']}
@@ -148,6 +148,7 @@ def agent_findings(evidence: dict, hard_journeys: set[str]) -> list[dict]:
             'classification': classify(any(issue_key(s) in base_keys for s in src), baseline_ran),
             'personas': sorted({s['persona'] for s in src}),
             'screenshots': [s['screenshot'] for s in src if s.get('screenshot')],
+            'fingerprint': '|'.join(['agent', *(str(k) for k in issue_key(src[0]))]),
         })
     return findings
 
@@ -172,6 +173,7 @@ def journey_findings(evidence: dict) -> list[dict]:
             'severity': 'major' if any(base) else 'minor',
             'rule': 'agent outcome only: capped at major' if any(base) else 'fails on the baseline too',
             'classification': 'new' if any(base) else 'pre-existing', 'paths': [], 'personas': [], 'screenshots': [],
+            'fingerprint': f'journey|{journey}|{device}',
         })
     return findings
 
@@ -252,8 +254,10 @@ def judge(evidence: dict, fail_on: list[str], fail_on_unclassified: bool = False
     findings = sig + agent_findings(evidence, hard_journeys) + journey_findings(evidence)
     order = {'new': 0, 'unclassified': 1, 'pre-existing': 2}
     findings.sort(key=lambda f: (order[f['classification']], rank(f['severity']), -len(f['personas'])))
+    fixes = evidence.get('fixes') or {}
     for n, f in enumerate(findings, 1):
         f['id'] = n
+        f['possible_fix'] = fixes.get(f['fingerprint'])
     gating = [f for f in findings if f['severity'] in fail_on and (
         f['classification'] == 'new' or (f['classification'] == 'unclassified' and fail_on_unclassified))]
     verdicts = persona_verdicts(evidence)

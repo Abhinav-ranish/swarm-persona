@@ -18,6 +18,7 @@ from pathlib import Path
 
 from . import __version__, preflight
 from .config import Config, https_origin
+from .fixes import pr_diff, suggest
 from .guard.proxy import GuardProxy
 from .journeys import add_with_model, select
 from .judge import judge
@@ -195,11 +196,15 @@ async def run(cfg: Config, *, out: Path, pr: str | None = None, pr_context_file:
     spent['tokens'] += tokens
     if merged is None:
         notes.append('The merge pass reply was unusable, so every raw report is listed unmerged.')
-    meta['tokens'] = spent['tokens']
     evidence = {'meta': meta, 'baseline_ran': any(s['target'] == 'baseline' for s in sessions),
                 'ctx': {'title': ctx['title'], 'files': ctx['files']}, 'personas': personas,
                 'checks': checks, 'sessions': [{k: v for k, v in s.items() if k != 'issues'} for s in sessions],
                 'raw_issues': raw, 'merge': merged}
+    diff = pr_diff(pr, pr_context_file) if cfg.report.suggest_fixes else ''
+    if diff.strip():
+        findings = judge(evidence, cfg.report.fail_on, cfg.report.fail_on_unclassified)['findings']
+        evidence['fixes'] = await suggest(cfg, findings, diff, spent, notes)
+    meta['tokens'] = spent['tokens']
     return finish(cfg, out, evidence)
 
 

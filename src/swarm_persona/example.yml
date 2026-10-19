@@ -91,3 +91,9 @@ report:
   title: Persona swarm
   fail_on: [blocker]
   fail_on_unclassified: false
+  # With a PR diff, one capped model call per new major-or-worse finding suggests a likely file and
+  # a minimal change from the journey's own files. Shown as "Possible fix (unverified)"; its tokens
+  # count toward budget.max_tokens.
+  suggest_fixes: true
+  fix_max_tokens: 1500
+  fix_diff_chars: 12000

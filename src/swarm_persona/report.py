@@ -84,6 +84,10 @@ def render(meta: dict, verdict: dict, sessions: list[dict], checks: list[dict], 
             if f['personas']:
                 meta_line += f" Seen by {', '.join(safe(p, 40) for p in f['personas'])}."
             lines += [meta_line, '']
+            if f.get('possible_fix'):
+                fix = f['possible_fix']
+                place = f"in `{safe(fix['file'], 120)}`: " if fix.get('file') else ''
+                lines += [f"Possible fix (unverified): {place}{safe(fix['change'], 800)}", '']
             shots = [img(images, s) for s in f['screenshots'][:3]]
             if any(shots):
                 lines += [' '.join(x for x in shots if x), '']

@@ -132,6 +132,17 @@ persona's verdict and why, and folds a **Worked well** list: personas return up 
 that went smoothly in their structured final answer. All of it is rebuilt from `evidence.json`, so
 `replay` shows it too.
 
+## Possible fixes
+
+When the PR's diff is available (`gh pr diff`, or a `diff` key in the `--pr-context` file), each
+**new** or **unclassified** finding of severity major or worse gets one model call. It sees the
+finding and only the part of the diff its journey `owns`, truncated to `report.fix_diff_chars`,
+and answers with the likely file and the smallest change. The report shows it as **Possible fix
+(unverified)**: nothing runs or checks it. At most five calls per run, each capped at
+`report.fix_max_tokens`, and their tokens count toward `budget.max_tokens`. Pre-existing findings,
+findings whose journey owns no changed file, and runs without a diff make no call. Turn it off with
+`report.suggest_fixes: false`. The answer is stored in `evidence.json`, so `replay` shows it.
+
 ## Output
 
 `--out` holds `report.md` (also the PR comment), `report.json` (findings, gate, metadata),
