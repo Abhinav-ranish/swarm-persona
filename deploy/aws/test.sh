@@ -33,9 +33,12 @@ phases:
   install:
     commands:
       - python3 -m pip install -q --user uv==0.12.15
+      # The live guard tests drive the real proxy; without mitmdump they skip.
+      - \$HOME/.local/bin/uv tool install -q --python 3.12 mitmproxy==11.1.3
   build:
     commands:
       - export PATH="\$HOME/.local/bin:\$PATH"
+      - export SWARM_PERSONA_MITMDUMP="\$(uv tool dir --bin)/mitmdump"
       - uv run -q --python 3.12 --extra dev --extra bedrock --extra mcp pytest -q $*
 YAML
 )
