@@ -33,22 +33,33 @@ def pr_diff(pr: str | None, context_file: str | None) -> str:
 
 
 def split_diff(diff: str) -> dict[str, str]:
-    """{path: that file's section of the diff}."""
+    """{path: that file's section of the diff}. A section is dropped when any name in it is
+    secret-like: the old and new paths, and a rename's source and target."""
     files = {}
     for chunk in re.split(r'(?m)^(?=diff --git )', diff):
         match = re.match(r'diff --git a/(\S+) b/(\S+)', chunk)
-        if match:
+        if not match:
+            continue
+        names = [*match.groups(), *re.findall(r'(?m)^(?:rename|copy) (?:from|to) (.+)$', chunk),
+                 *re.findall(r'(?m)^(?:---|\+\+\+) [ab]/(.+)$', chunk)]
+        if not any(secret_like(n.strip()) for n in names):
             files[match.group(2)] = chunk
     return files
 
 
-# Never sent to the model, whatever a journey owns: env files, keys and anything named like a secret.
-SECRET_NAME = re.compile(r'(^\.env|\.(pem|key|p12|pfx|jks|keystore|asc|gpg)$|^id_(rsa|dsa|ecdsa|ed25519)|'
-                         r'secret|credential|passw|^\.(npmrc|netrc|pypirc)$)', re.IGNORECASE)
+# Never sent to the model, whatever a journey owns. Matched against every segment of the path, so a
+# secrets/ folder anywhere counts.
+SECRET_NAME = re.compile(
+    r'(^\.env|\.env$|^\.dev\.vars|\.(pem|key|p8|p12|pfx|jks|keystore|asc|gpg)$|\.tfvars(\.json)?$|'
+    r'^id_(rsa|dsa|ecdsa|ed25519)|secret|credential|passw|token|api[_-]?key|service[-_]?account|'
+    r'^\.(npmrc|netrc|pypirc)$)', re.IGNORECASE)
 
 
 def secret_like(path: str) -> bool:
-    return bool(SECRET_NAME.search(path.rsplit('/', 1)[-1]))
+    path = path.strip().strip('"')
+    if re.search(r'(^|/)\.docker/config\.json$', path, re.IGNORECASE):
+        return True
+    return any(SECRET_NAME.search(segment) for segment in path.split('/') if segment)
 
 
 def owned_diff(files: dict[str, str], globs: list[str], cap: int) -> tuple[str, list[str]]:

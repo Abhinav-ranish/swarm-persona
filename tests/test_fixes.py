@@ -1,5 +1,7 @@
 import asyncio
 import json
+
+import pytest
 from pathlib import Path
 
 from evidence_builder import check, evidence, issue
@@ -203,3 +205,32 @@ def test_each_finding_gets_its_own_fix_even_when_fingerprints_collide(monkeypatc
     ev['fixes'] = asyncio.run(fixes.suggest(cfg(), found, DIFF, {'tokens': 0}, []))
     rejudged = {f['title']: f['possible_fix']['change'] for f in judge(ev, ['blocker'])['findings'] if f['source'] == 'agent'}
     assert rejudged == {'Save does nothing': 'Fix the save handler.', 'Sidebar covers text': 'Narrow the sidebar.'}
+
+
+@pytest.mark.parametrize('path', [
+    'config/secrets/app.yml', 'secrets/x.ts', 'a/b/Secret/c.json', 'keys/AuthKey_ABC.p8', '.dev.vars', 'w/.dev.vars',
+    'infra/prod.tfvars', 'infra/x.tfvars.json', 'deploy/prod.env', '.env', 'src/auth/tokens.ts',
+    'src/api_key.ts', 'cfg/apikey.json', 'gcp/service-account.json', 'service_account.json', '.docker/config.json',
+    'home/.docker/config.json', 'certs/server.pem', 'k.key', 'id_ed25519', '.npmrc'])
+def test_secret_like_checks_every_segment_and_more_names(path):
+    assert fixes.secret_like(path)
+
+
+@pytest.mark.parametrize('path', ['src/app/write/page.tsx', 'config/app.yml', 'docs/environment.md', 'src/keyboard.ts',
+                                  'docker/config.json', 'src/envelope.ts'])
+def test_ordinary_files_are_not_secret_like(path):
+    assert not fixes.secret_like(path)
+
+
+def test_a_rename_from_a_secret_file_is_never_sent():
+    diff = """diff --git a/config/.env.production b/config/app.yml
+similarity index 90%
+rename from config/.env.production
+rename to config/app.yml
++API_KEY=sk-live-123
+diff --git a/config/other.yml b/config/other.yml
++ok: 1
+"""
+    assert list(fixes.split_diff(diff)) == ['config/other.yml']
+    sneaky = diff.replace('diff --git a/config/.env.production b/config/app.yml', 'diff --git a/config/app.yml b/config/app.yml')
+    assert list(fixes.split_diff(sneaky)) == ['config/other.yml']  # caught by the rename line alone
