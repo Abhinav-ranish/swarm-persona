@@ -115,3 +115,26 @@ def test_one_preview_persona_finishing_the_journey_means_no_journey_finding():
     ev = evidence(sessions=[session('preview', 1, achieved=False), session('preview', 2, achieved=True),
                             session('baseline', 1), session('baseline', 2)])
     assert by_kind(judge(ev, ['major']), 'journey') == []
+
+
+def agent_prints(result):
+    return [f['fingerprint'] for f in result['findings'] if f['source'] == 'agent']
+
+
+def test_two_problems_of_one_category_on_one_page_get_distinct_fingerprints():
+    raw = [issue('preview', 1, title='Save button does nothing'), issue('preview', 2, title='Sidebar overlaps the editor')]
+    prints = agent_prints(judge(evidence(raw=raw, baseline_ran=False), ['blocker']))
+    assert len(set(prints)) == 2
+
+
+def test_an_agent_fingerprint_ignores_merge_order_and_the_merge_title():
+    a, b = issue('preview', 1, title='Save does nothing'), issue('preview', 2, title='Save is dead', url='https://app.example.com/w2')
+
+    def merged(raw, ids, title):
+        m = {'issues': [{'severity': 'major', 'category': 'ux', 'title': title, 'detail': 'd', 'source_ids': ids}],
+             'dropped': []}
+        return agent_prints(judge(evidence(raw=raw, merge=m, baseline_ran=False), ['blocker']))
+
+    first = merged([a, b], [0, 1], 'Save broken')
+    assert first == merged([b, a], [0, 1], 'Saving fails') == merged([a, b], [1, 0], 'x')
+    assert first == ['agent|write|/w#|ux;write|/write|ux|save is dead']  # least key: /w# sorts before /write

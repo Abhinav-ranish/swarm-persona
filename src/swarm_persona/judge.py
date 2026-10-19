@@ -119,6 +119,15 @@ def issue_key(issue: dict) -> tuple:
     return (issue.get('journey') or '', path, issue.get('category'))
 
 
+def agent_fingerprint(src: list[dict]) -> str:
+    """Every source's (journey, page, category), sorted, plus the title of the source with the least
+    key, normalized: stable however the merge orders its sources, distinct for two problems of one
+    category on one page. The merge model's own title is not used, since it varies run to run."""
+    keyed = sorted(('|'.join(str(k) for k in issue_key(s)), normalize(s.get('title') or '')) for s in src)
+    keys = sorted({k for k, _ in keyed})
+    return 'agent|' + ';'.join(keys) + '|' + keyed[0][1]
+
+
 def agent_findings(evidence: dict, hard_journeys: set[str]) -> list[dict]:
     raw = [i for i in evidence['raw_issues'] if i['target'] == 'preview']
     base_keys = {issue_key(i) for i in evidence['raw_issues'] if i['target'] == 'baseline'}
@@ -148,7 +157,7 @@ def agent_findings(evidence: dict, hard_journeys: set[str]) -> list[dict]:
             'classification': classify(any(issue_key(s) in base_keys for s in src), baseline_ran),
             'personas': sorted({s['persona'] for s in src}),
             'screenshots': [s['screenshot'] for s in src if s.get('screenshot')],
-            'fingerprint': '|'.join(['agent', *(str(k) for k in issue_key(src[0]))]),
+            'fingerprint': agent_fingerprint(src),
         })
     return findings
 
