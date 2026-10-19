@@ -64,7 +64,8 @@ def task_prompt(cfg: Config, ctx: dict, persona: dict, origin: str) -> str:
     mobile = persona['device'] == 'mobile'
     criteria = f"\nYou have succeeded when: {persona['success_criteria']}" if persona.get('success_criteria') else ''
     return f"""You are {persona['name']}: {persona['who']}
-You are on a {'phone' if mobile else 'laptop'} and your patience is {persona['patience']}.
+You are on a {'phone' if mobile else 'laptop'}, your comfort with technology is
+{persona.get('tech_comfort', 'medium')} and your patience is {persona['patience']}.
 You are using {cfg.app.name}. Behave like this real person, not like a QA engineer: read what is
 on screen, react honestly, and give up the way this person would if something is too confusing.
 

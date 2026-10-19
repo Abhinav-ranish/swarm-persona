@@ -60,6 +60,21 @@ personas:
   count: 4
   max_steps: 25
   concurrency: 3
+  # Who uses the app. The planner casts generated personas from this audience.
+  audience: >-
+    Team leads at agencies of 5 to 20 people, mostly on laptops, some checking notes on a phone
+    between meetings; few of them read documentation.
+  # Fixed people, used in order before any are generated, so a regression run meets the same
+  # testers every time. The model writes personas only for the seats left over.
+  saved:
+    - name: Priya
+      background: Runs a five-person design studio and switches between client projects all day.
+      tech_comfort: high
+      patience: low
+    - name: Tom
+      background: An account manager who is new to the team and has never used a notes app at work.
+      tech_comfort: low
+      patience: medium
 
 llm:
   provider: bedrock          # bedrock | anthropic | openai (any OpenAI-compatible base_url)

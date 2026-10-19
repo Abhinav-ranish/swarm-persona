@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 Severity = Literal['blocker', 'major', 'minor', 'polish']
 SEVERITIES: list[str] = ['blocker', 'major', 'minor', 'polish']
 Device = Literal['desktop', 'mobile']
+Level = Literal['low', 'medium', 'high']
 
 
 class Strict(BaseModel):
@@ -128,11 +129,22 @@ class Journey(Strict):
     devices: list[Device] = Field(default_factory=lambda: ['desktop', 'mobile'])
 
 
+class SavedPersona(Strict):
+    """A fixed person, reused run after run so a regression run meets the same people."""
+
+    name: str = Field(min_length=1, max_length=40)
+    background: str = Field(min_length=1, max_length=300, description='One sentence: role and context.')
+    tech_comfort: Level = 'medium'
+    patience: Level = 'medium'
+
+
 class Personas(Strict):
     count: int = Field(4, ge=1)
     max_steps: int = Field(25, ge=1)
     concurrency: int = Field(3, ge=1)
     forbidden_goal_words: list[str] = Field(default_factory=list, description='Added to the built-in list.')
+    audience: str = Field('', max_length=1000, description='Who uses the app; the planner casts from it.')
+    saved: list[SavedPersona] = Field(default_factory=list, description='Fill seats in order before any are generated.')
 
 
 class LLM(Strict):

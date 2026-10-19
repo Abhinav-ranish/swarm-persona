@@ -97,6 +97,23 @@ them unless `report.fail_on_unclassified` is set.
 **Gate.** The run fails when a `new` finding (or an `unclassified` one, if you opted in) has a
 severity in `report.fail_on` (default `[blocker]`).
 
+## Audience and saved personas
+
+`personas.audience` is free text about who uses the app ("team leads at small agencies, mostly on
+laptops"); the planner casts every generated persona from it. `personas.saved` lists fixed people
+(`name`, `background`, `tech_comfort`, `patience`). They take the seats in order before any are
+generated, and the model writes personas only for the seats left over, so a regression run meets
+the same testers every time. When the saved list fills every seat, planning makes no model call.
+
+```yaml
+personas:
+  count: 3
+  audience: Team leads at agencies of 5 to 20 people; few read documentation.
+  saved:
+    - {name: Priya, background: Runs a five-person design studio., tech_comfort: high, patience: low}
+    - {name: Tom, background: A new account manager., tech_comfort: low}
+```
+
 ## Output
 
 `--out` holds `report.md` (also the PR comment), `report.json` (findings, gate, metadata),
