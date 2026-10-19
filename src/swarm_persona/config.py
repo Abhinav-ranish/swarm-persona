@@ -168,7 +168,7 @@ class Report(Strict):
     fail_on_unclassified: bool = Field(False, description='Gate on findings when no baseline ran.')
     no_em_dashes: bool = False
     images_repo: str | None = Field(None, description='owner/name to commit screenshots to so the comment shows them.')
-    suggest_fixes: bool = Field(True, description='Ask the model for a likely fix to new major-or-worse findings.')
+    suggest_fixes: bool = Field(False, description='Send the owned PR diff to the model for a likely fix (opt-in).')
     fix_max_tokens: int = Field(1500, ge=100, description='Reply cap for each possible-fix call.')
     fix_diff_chars: int = Field(12000, ge=500, description="Diff sent per call: the journey's owned files, truncated.")
 

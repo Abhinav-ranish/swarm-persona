@@ -200,12 +200,25 @@ async def run(cfg: Config, *, out: Path, pr: str | None = None, pr_context_file:
                 'ctx': {'title': ctx['title'], 'files': ctx['files']}, 'personas': personas,
                 'checks': checks, 'sessions': [{k: v for k, v in s.items() if k != 'issues'} for s in sessions],
                 'raw_issues': raw, 'merge': merged}
-    diff = pr_diff(pr, pr_context_file) if cfg.report.suggest_fixes else ''
-    if diff.strip():
-        findings = judge(evidence, cfg.report.fail_on, cfg.report.fail_on_unclassified)['findings']
-        evidence['fixes'] = await suggest(cfg, findings, diff, spent, notes)
+    evidence['fixes'] = await add_fixes(cfg, evidence, pr, pr_context_file, spent, notes)
     meta['tokens'] = spent['tokens']
     return finish(cfg, out, evidence)
+
+
+async def add_fixes(cfg: Config, evidence: dict, pr: str | None, pr_context_file: str | None, spent: dict,
+                    notes: list[str]) -> dict:
+    """Possible fixes for the judged findings. Never fails the run: on any error, a note and no fixes."""
+    if not cfg.report.suggest_fixes:
+        return {}
+    try:
+        diff = pr_diff(pr, pr_context_file)
+        if not diff.strip():
+            return {}
+        findings = judge(evidence, cfg.report.fail_on, cfg.report.fail_on_unclassified)['findings']
+        return await suggest(cfg, findings, diff, spent, notes)
+    except (Exception, SystemExit) as error:  # a missing API key raises SystemExit
+        notes.append(f'Possible fixes were skipped: {type(error).__name__}.')
+        return {}
 
 
 def finish(cfg: Config, out: Path, evidence: dict) -> dict:

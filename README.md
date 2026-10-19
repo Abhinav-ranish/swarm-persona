@@ -134,14 +134,20 @@ that went smoothly in their structured final answer. All of it is rebuilt from `
 
 ## Possible fixes
 
-When the PR's diff is available (`gh pr diff`, or a `diff` key in the `--pr-context` file), each
-**new** or **unclassified** finding of severity major or worse gets one model call. It sees the
-finding and only the part of the diff its journey `owns`, truncated to `report.fix_diff_chars`,
-and answers with the likely file and the smallest change. The report shows it as **Possible fix
-(unverified)**: nothing runs or checks it. At most five calls per run, each capped at
-`report.fix_max_tokens`, and their tokens count toward `budget.max_tokens`. Pre-existing findings,
-findings whose journey owns no changed file, and runs without a diff make no call. Turn it off with
-`report.suggest_fixes: false`. The answer is stored in `evidence.json`, so `replay` shows it.
+Opt-in: set `report.suggest_fixes: true`. **Enabling it sends part of your PR's diff to the
+configured model.** When the diff is available (`gh pr diff`, or a `diff` key in the
+`--pr-context` file), each **new** or **unclassified** finding of severity major or worse gets one
+model call. It sees the finding and only the part of the diff its journey `owns`, truncated to
+`report.fix_diff_chars`. Files named like secrets are never sent, whatever the globs say: `.env*`,
+`*.pem`, `*.key`, `*.p12`, SSH keys, `.npmrc` / `.netrc` / `.pypirc`, and any name containing
+`secret`, `credential` or `passw`. The model answers with the likely file and the smallest change,
+and the report shows it as **Possible fix (unverified)**: nothing runs or checks it.
+
+At most five calls per run (attempts, not successes), each capped at `report.fix_max_tokens`. A
+call starts only when that whole cap still fits in `budget.max_tokens`, and its tokens count toward
+it. Pre-existing findings, findings whose journey owns no changed file, and runs without a diff make
+no call. A failed call skips that finding, and any error in this step leaves a note instead of
+failing the run. The answers are stored in `evidence.json`, so `replay` shows them.
 
 ## Output
 

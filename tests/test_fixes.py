@@ -28,8 +28,8 @@ diff --git a/src/billing/pay.ts b/src/billing/pay.ts
 def cfg(**report) -> Config:
     return Config.model_validate({
         'app': {'name': 'A', 'description': 'd', 'url': 'https://preview.example.com'},
-        'journeys': [{'name': 'write', 'goal': 'Write.', 'owns': ['src/app/write/**']}],
-        'report': report, 'budget': {'max_tokens': 1000}})
+        'journeys': [{'name': 'write', 'goal': 'Write.', 'owns': ['src/app/write/**', 'config/**']}],
+        'report': {'suggest_fixes': True, 'fix_max_tokens': 500, **report}, 'budget': {'max_tokens': 1000}})
 
 
 def fake_llm(monkeypatch, reply=None):
@@ -82,8 +82,9 @@ def test_no_diff_disabled_or_spent_budget_means_no_call(monkeypatch):
     assert asyncio.run(fixes.suggest(cfg(), findings(), '', {'tokens': 0}, [])) == {}
     assert asyncio.run(fixes.suggest(cfg(suggest_fixes=False), findings(), DIFF, {'tokens': 0}, [])) == {}
     notes = []
-    assert asyncio.run(fixes.suggest(cfg(), findings(), DIFF, {'tokens': 1000}, notes)) == {}
-    assert calls == [] and notes == ['Budget: some findings got no possible fix.']
+    assert asyncio.run(fixes.suggest(cfg(), findings(), DIFF, {'tokens': 501}, notes)) == {}  # 501 + 500 > 1000
+    assert calls == [] and notes == ['Budget: possible fixes stopped, budget.max_tokens would be exceeded.']
+    assert asyncio.run(fixes.suggest(cfg(), findings(), DIFF, {'tokens': 500}, [])) and len(calls) == 1
 
 
 def test_a_file_outside_the_owned_diff_is_dropped_and_an_empty_change_is_no_fix():
@@ -107,3 +108,80 @@ def test_replay_shows_the_possible_fix_defanged(tmp_path):
     assert '@octocat' not in report
     saved = json.loads((tmp_path / 'report.json').read_text())
     assert sum(1 for f in saved['findings'] if f['possible_fix']) == 1
+
+
+def test_fixes_are_opt_in():
+    assert Config.model_validate({'app': {'name': 'A', 'description': 'd',
+                                          'url': 'https://p.example.com'}}).report.suggest_fixes is False
+
+
+SECRET_DIFF = DIFF + """diff --git a/config/.env.production b/config/.env.production
++API_KEY=sk-live-123
+diff --git a/config/server.pem b/config/server.pem
++-----BEGIN PRIVATE KEY-----
+diff --git a/config/db_secrets.yml b/config/db_secrets.yml
++password: hunter2
+diff --git a/config/app.yml b/config/app.yml
++z_index: 3
+"""
+
+
+def test_secret_like_files_never_reach_the_model(monkeypatch):
+    calls = fake_llm(monkeypatch)
+    asyncio.run(fixes.suggest(cfg(), findings(), SECRET_DIFF, {'tokens': 0}, []))
+    prompt = calls[0][0]
+    assert 'config/app.yml' in prompt and 'z_index' in prompt
+    for leaked in ('sk-live-123', 'PRIVATE KEY', 'hunter2', '.env.production'):
+        assert leaked not in prompt
+    assert [p for p in ['.env', 'a/.env.local', 'k.key', 'id_rsa', 'x/.npmrc', 'Secrets.json', 'credentials.ts']
+            if not fixes.secret_like(p)] == []
+    assert not fixes.secret_like('src/app/write/page.tsx')
+
+
+def many_majors():
+    from evidence_builder import check as chk
+    ev = evidence(checks=[chk('preview', status=500, page_errors=[f'Error {c}' for c in 'abcdefg'])], baseline_ran=False)
+    return [f for f in judge(ev, ['blocker'])['findings'] if f['severity'] in ('blocker', 'major')]
+
+
+def test_one_failed_call_does_not_drop_the_others(monkeypatch):
+    replies = iter([RuntimeError('throttled'), {'file': None, 'change': 'Fix it.'}])
+
+    async def complete(llm, prompt, max_tokens=12000):
+        reply = next(replies)
+        if isinstance(reply, Exception):
+            raise reply
+        return json.dumps(reply), 10
+
+    monkeypatch.setattr(fixes, 'complete', complete)
+    notes = []
+    out = asyncio.run(fixes.suggest(cfg(), many_majors()[:2], DIFF, {'tokens': 0}, notes))
+    assert len(out) == 1 and notes == ['No possible fix for finding 1: RuntimeError.']
+
+
+def test_the_cap_counts_attempts_not_successes(monkeypatch):
+    calls = fake_llm(monkeypatch, {'file': None, 'change': ''})  # every reply unusable
+    notes = []
+    majors = many_majors()
+    assert len(majors) > fixes.MAX_SUGGESTIONS
+    assert asyncio.run(fixes.suggest(cfg(), majors, DIFF, {'tokens': 0}, notes)) == {}
+    assert len(calls) == fixes.MAX_SUGGESTIONS
+    assert notes == [f'Possible fixes stopped at the cap of {fixes.MAX_SUGGESTIONS} calls per run.']
+
+
+def test_an_error_in_the_fix_step_never_loses_the_run(tmp_path, monkeypatch):
+    from swarm_persona import run as run_mod
+
+    async def boom(*a, **k):
+        raise RuntimeError('model down')
+
+    ctx = tmp_path / 'pr.json'
+    ctx.write_text(json.dumps({'diff': DIFF}))
+    monkeypatch.setattr(run_mod, 'suggest', boom)
+    notes = []
+    ev = json.loads(FIXTURE.read_text())
+    assert asyncio.run(run_mod.add_fixes(cfg(), ev, None, str(ctx), {'tokens': 0}, notes)) == {}
+    assert notes == ['Possible fixes were skipped: RuntimeError.']
+    monkeypatch.setattr(run_mod, 'pr_diff', lambda *a: (_ for _ in ()).throw(ValueError('bad json')))
+    assert asyncio.run(run_mod.add_fixes(cfg(), ev, '7', None, {'tokens': 0}, notes)) == {}
+    assert asyncio.run(run_mod.add_fixes(cfg(suggest_fixes=False), ev, '7', None, {'tokens': 0}, [])) == {}

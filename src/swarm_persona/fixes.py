@@ -42,8 +42,17 @@ def split_diff(diff: str) -> dict[str, str]:
     return files
 
 
+# Never sent to the model, whatever a journey owns: env files, keys and anything named like a secret.
+SECRET_NAME = re.compile(r'(^\.env|\.(pem|key|p12|pfx|jks|keystore|asc|gpg)$|^id_(rsa|dsa|ecdsa|ed25519)|'
+                         r'secret|credential|passw|^\.(npmrc|netrc|pypirc)$)', re.I)
+
+
+def secret_like(path: str) -> bool:
+    return bool(SECRET_NAME.search(path.rsplit('/', 1)[-1]))
+
+
 def owned_diff(files: dict[str, str], globs: list[str], cap: int) -> tuple[str, list[str]]:
-    paths = [p for p in files if any(matches(g, p) for g in globs)]
+    paths = [p for p in files if not secret_like(p) and any(matches(g, p) for g in globs)]
     return ''.join(files[p] for p in paths)[:cap], paths
 
 
@@ -80,21 +89,32 @@ def parse(text: str, paths: list[str]) -> dict | None:
 
 
 async def suggest(cfg: Config, findings: list[dict], diff: str, spent: dict, notes: list[str]) -> dict[str, dict]:
-    """{finding fingerprint: {file, change}}. Each call's tokens count toward budget.max_tokens."""
+    """{finding fingerprint: {file, change}}. Each call's tokens count toward budget.max_tokens, and
+    a call starts only when its whole reply cap still fits. One failed call skips that finding only."""
     if not cfg.report.suggest_fixes or not diff.strip():
         return {}
-    files, journeys, out = split_diff(diff), {j.name: j for j in cfg.journeys}, {}
+    files, journeys = split_diff(diff), {j.name: j for j in cfg.journeys}
+    out: dict[str, dict] = {}
+    tried: set[str] = set()
     for finding in findings:
-        if not wanted(finding) or finding['fingerprint'] in out:
+        if not wanted(finding) or finding['fingerprint'] in tried:
             continue
         globs = [g for name in (finding['journey'] or '').split(', ') if name in journeys for g in journeys[name].owns]
         text, paths = owned_diff(files, globs, cfg.report.fix_diff_chars)
         if not text:
             continue
-        if len(out) >= MAX_SUGGESTIONS or spent['tokens'] >= cfg.budget.max_tokens:
-            notes.append('Budget: some findings got no possible fix.')
+        if len(tried) >= MAX_SUGGESTIONS:
+            notes.append(f'Possible fixes stopped at the cap of {MAX_SUGGESTIONS} calls per run.')
             break
-        reply, tokens = await complete(cfg.llm, prompt(finding, text), max_tokens=cfg.report.fix_max_tokens)
+        if spent['tokens'] + cfg.report.fix_max_tokens > cfg.budget.max_tokens:
+            notes.append('Budget: possible fixes stopped, budget.max_tokens would be exceeded.')
+            break
+        tried.add(finding['fingerprint'])
+        try:
+            reply, tokens = await complete(cfg.llm, prompt(finding, text), max_tokens=cfg.report.fix_max_tokens)
+        except (Exception, SystemExit) as error:  # a missing API key raises SystemExit
+            notes.append(f"No possible fix for finding {finding.get('id', '?')}: {type(error).__name__}.")
+            continue
         spent['tokens'] += tokens
         fix = parse(reply, paths)
         if fix:
