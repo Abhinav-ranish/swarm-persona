@@ -180,7 +180,7 @@ def test_findings_reads_the_runs_report(home):
 def test_close_sends_sigterm_then_sigkill_after_150_seconds(home, monkeypatch):
     run_id = mcp_server.start(str(EXAMPLE))['run_id']
     killed = []
-    monkeypatch.setattr(mcp_server.os, 'kill', lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(mcp_server.os, 'killpg', lambda pid, sig: killed.append((pid, sig)))
     assert mcp_server.close(run_id) == {'run_id': run_id, 'state': 'closing'}
     assert killed == [(4242, signal.SIGTERM)]
     assert mcp_server.status(run_id)['state'] == 'closing' and len(killed) == 1
@@ -200,7 +200,7 @@ def test_close_sends_sigterm_then_sigkill_after_150_seconds(home, monkeypatch):
 
 def test_a_clean_close_is_closed(home, monkeypatch):
     run_id = mcp_server.start(str(EXAMPLE))['run_id']
-    monkeypatch.setattr(mcp_server.os, 'kill', lambda pid, sig: None)
+    monkeypatch.setattr(mcp_server.os, 'killpg', lambda pid, sig: None)
     mcp_server.close(run_id)
     finish(143)
     assert mcp_server.status(run_id)['state'] == 'closed'
@@ -236,3 +236,53 @@ def test_the_server_registers_its_tools():
     schema = next(t for t in tools if t.name == 'test')
     params = getattr(schema, 'input_schema', None) or schema.inputSchema
     assert params['required'] == ['config_path'] and set(params['properties']) == {'config_path', 'goal', 'audience', 'journeys'}
+
+
+def test_close_on_a_process_group_that_is_already_gone_marks_it_closed(home, monkeypatch):
+    run_id = mcp_server.start(str(EXAMPLE))['run_id']
+
+    def gone(pid, sig):
+        raise ProcessLookupError
+
+    monkeypatch.setattr(mcp_server.os, 'killpg', gone)
+    assert mcp_server.close(run_id) == {'run_id': run_id, 'state': 'closed'}
+    meta_file = home / run_id / 'run.json'
+    meta = json.loads(meta_file.read_text())
+    assert meta['closed']
+    meta['closed'] -= 151
+    meta_file.write_text(json.dumps(meta))
+    assert mcp_server.status(run_id)['state'] == 'closed'  # SIGKILL found nothing: no raise
+    assert json.loads(meta_file.read_text())['killed']
+
+
+def test_run_json_is_written_atomically(home, monkeypatch):
+    replaced = []
+    real = os.replace
+    monkeypatch.setattr(mcp_server.os, 'replace', lambda a, b: replaced.append((Path(a).name, Path(b).name)) or real(a, b))
+    run_id = mcp_server.start(str(EXAMPLE))['run_id']
+    assert replaced and replaced[0][0].startswith('.run.') and replaced[0][1] == 'run.json'
+    assert sorted(p.name for p in (home / run_id).iterdir()) == ['auth.log', 'config.yml', 'run.json', 'run.log']
+
+
+def test_corrupt_or_half_written_run_dirs_are_skipped(home):
+    good = mcp_server.start(str(EXAMPLE))['run_id']
+    finish(0)
+    for name, content in [('20990101-000000-aaaaaa', '{"run_id": '), ('20990101-000001-bbbbbb', '{"pid": 1}'),
+                          ('20990101-000002-cccccc', '[]'), ('20990101-000003-dddddd', None)]:
+        (home / name).mkdir()
+        if content is not None:
+            (home / name / 'run.json').write_text(content)
+    assert [r['run_id'] for r in mcp_server.list_runs()] == [good]
+    assert mcp_server.prune(0)['removed'] == [good]
+    assert mcp_server.start(str(EXAMPLE))['state'] == 'running'
+
+
+def test_the_cap_check_and_first_write_happen_under_a_file_lock(home, monkeypatch):
+    events = []
+    real_flock = mcp_server.fcntl.flock
+    monkeypatch.setattr(mcp_server.fcntl, 'flock', lambda fh, op: events.append(('flock', op)) or real_flock(fh, op))
+    real_save = mcp_server.save_meta
+    monkeypatch.setattr(mcp_server, 'save_meta', lambda path, meta: events.append(('save',)) or real_save(path, meta))
+    mcp_server.start(str(EXAMPLE))
+    assert events == [('flock', mcp_server.fcntl.LOCK_EX), ('save',), ('flock', mcp_server.fcntl.LOCK_UN)]
+    assert (home / '.lock').exists()

@@ -219,7 +219,7 @@ claude mcp add swarm-persona -- swarm-persona mcp
 | `status(run_id)` | state (`running`, `closing`, `killed`, `passed`, `gate-failed`, `error`, `closed`), elapsed seconds, personas planned and done per target, the last log lines |
 | `findings(run_id)` | the run's `report.json`: gate, summary, per-persona verdicts, worked-well notes, findings |
 | `list_runs()` | known runs, newest first |
-| `close(run_id)` | SIGTERM, which the CLI unwinds: proxies stop and the sign-out command runs. If the run is still alive 150 seconds later, the next `status`, `list_runs` or `close` sends SIGKILL |
+| `close(run_id)` | SIGTERM to the run's process group, which the CLI unwinds: proxies stop and the sign-out command runs. If the run is still alive 150 seconds later, the next `status`, `list_runs` or `close` sends the group SIGKILL |
 | `prune(older_than_days)` | deletes the directories of runs older than that (default 7 days), keeping running ones |
 
 Each run lives in `~/.swarm-persona/runs/<run_id>/` (`SWARM_PERSONA_HOME` moves it): the config
@@ -231,8 +231,11 @@ relative paths in the config, such as an auth helper script, resolve the same wa
 repository; `run.json` records it.
 
 A config that fails to load gets one generic error, never its parse error, so the tool cannot be
-used to read other files. To limit which configs an MCP client may run at all, set
-`SWARM_PERSONA_CONFIGS` to the allowed paths, separated by `:` (`;` on Windows):
+used to read other files. **Set `SWARM_PERSONA_CONFIGS` whenever the MCP client is not fully
+trusted** (an agent that reads web pages, issues or other people's code counts): a config's
+`auth.command` and `auth.sign_out_command` run arbitrary commands, so a client that can point
+`test` at any YAML file can run anything you can. With the variable set, only the listed paths are
+accepted, separated by `:` (`;` on Windows):
 
 ```bash
 claude mcp add swarm-persona -e SWARM_PERSONA_CONFIGS="$PWD/swarm-persona.yml" -- swarm-persona mcp

@@ -10,6 +10,7 @@ The auth command's output goes to a 0600 auth.log that no tool returns.
 No `from __future__ import annotations`: the MCP SDK reads the tools' annotations for their schemas.
 """
 
+import fcntl
 import inspect
 import json
 import os
@@ -19,7 +20,9 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import yaml
@@ -128,23 +131,63 @@ def state_of(path: Path, meta: dict) -> str:
 
 
 def save_meta(path: Path, meta: dict) -> None:
-    (path / 'run.json').write_text(json.dumps(meta, indent=2))
+    """Atomic: a reader never sees half a run.json."""
+    fd, tmp = tempfile.mkstemp(dir=path, prefix='.run.', suffix='.json')
+    try:
+        with os.fdopen(fd, 'w') as fh:
+            fh.write(json.dumps(meta, indent=2))
+        os.replace(tmp, path / 'run.json')
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def signal_group(pid: int, sig: int) -> bool:
+    """Signal the run's whole process group (spawned with start_new_session, so pgid == pid).
+    False when it is already gone."""
+    try:
+        os.killpg(pid, sig)
+    except ProcessLookupError:
+        return False
+    return True
 
 
 def escalate(path: Path, meta: dict, state: str) -> str:
     """SIGKILL a run that is still alive KILL_AFTER seconds after close sent SIGTERM."""
     if state != 'closing' or meta.get('killed') or time.time() - meta['closed'] < KILL_AFTER:
         return state
-    os.kill(meta['pid'], signal.SIGKILL)
+    gone = not signal_group(meta['pid'], signal.SIGKILL)
     meta['killed'] = time.time()
     save_meta(path, meta)
-    return 'killed'
+    return 'closed' if gone else 'killed'
+
+
+@contextmanager
+def runs_lock():
+    """Held around the concurrency check and the new run's first run.json, across MCP servers."""
+    runs_home().mkdir(parents=True, exist_ok=True)
+    with open(runs_home() / '.lock', 'a') as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh, fcntl.LOCK_UN)
 
 
 def runs() -> list[tuple[Path, dict]]:
+    """Every readable run, newest first; a corrupt or half-written run directory is skipped."""
     home = runs_home()
-    paths = sorted((p for p in home.iterdir() if (p / 'run.json').exists()), reverse=True) if home.exists() else []
-    return [(p, read_meta(p)) for p in paths]
+    out = []
+    for path in sorted((p for p in home.iterdir() if p.is_dir()), reverse=True) if home.exists() else []:
+        try:
+            meta = read_meta(path)
+            if not (RUN_ID.fullmatch(str(meta['run_id'])) and isinstance(meta['pid'], int)
+                    and isinstance(meta['started'], (int, float))):
+                continue
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        out.append((path, meta))
+    return out
 
 
 def progress(path: Path) -> dict:
@@ -173,11 +216,17 @@ def start(config_path: str, goal: str | None = None, audience: str | None = None
     runs at a time. Poll with status, read with findings."""
     config = allowed_config(config_path)
     data = derive(str(config), goal, audience, journeys)
+    cwd = run_cwd(config)
+    with runs_lock():
+        return launch(config, data, cwd, goal, audience, journeys)
+
+
+def launch(config: Path, data: dict, cwd: str, goal, audience, journeys) -> dict:
+    """Under runs_lock: the concurrency check, the spawn and the first run.json."""
     active = [m['run_id'] for p, m in runs() if state_of(p, m) in ('running', 'closing')]
     if len(active) >= MAX_RUNNING:
         raise ValueError(f'{len(active)} runs are already running ({", ".join(active)}); '
                          f'at most {MAX_RUNNING} at a time. Wait for one, or close it.')
-    cwd = run_cwd(config)
     run_id = time.strftime('%Y%m%d-%H%M%S') + '-' + secrets.token_hex(3)
     path = runs_home() / run_id
     path.mkdir(parents=True, mode=0o700)
@@ -253,10 +302,10 @@ def close(run_id: str) -> dict:
     state = escalate(path, meta, state_of(path, meta))
     if state != 'running':
         return {'run_id': run_id, 'state': state, 'message': 'not running'}
-    os.kill(meta['pid'], signal.SIGTERM)
+    gone = not signal_group(meta['pid'], signal.SIGTERM)
     meta['closed'] = time.time()
     save_meta(path, meta)
-    return {'run_id': run_id, 'state': 'closing'}
+    return {'run_id': run_id, 'state': 'closed' if gone else 'closing'}
 
 
 TOOLS = {'test': start, 'status': status, 'findings': findings, 'list_runs': list_runs, 'close': close,
