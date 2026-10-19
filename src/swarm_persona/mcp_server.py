@@ -4,7 +4,8 @@ findings, stop it.
 Every tool wraps the CLI. `test` writes a per-run config and starts `swarm-persona run` in its own
 process with its output under ~/.swarm-persona/runs/<run_id>, so the guard self-test, preflight,
 budgets and sign-out happen exactly as they do on the command line. `close` sends that process
-SIGTERM, which the CLI unwinds to sign-out.
+SIGTERM, which the CLI unwinds to sign-out, and SIGKILL if it is still alive 150 seconds later.
+The auth command's output goes to a 0600 auth.log that no tool returns.
 
 No `from __future__ import annotations`: the MCP SDK reads the tools' annotations for their schemas.
 """
@@ -14,6 +15,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import signal
 import subprocess
 import sys
@@ -26,7 +28,10 @@ from .config import Config, Journey, load
 from .planner import forbidden_re
 
 RUN_ID = re.compile(r'\d{8}-\d{6}-[0-9a-f]{6}')
-EXIT_STATES = {0: 'passed', 1: 'gate-failed', 2: 'error', 143: 'closed', -15: 'closed'}
+EXIT_STATES = {0: 'passed', 1: 'gate-failed', 2: 'error', 143: 'closed', -15: 'closed', -9: 'killed'}
+MAX_RUNNING = 2
+KILL_AFTER = 150
+BAD_CONFIG = 'config_path could not be loaded as a swarm-persona config; run swarm-persona check-config on it'
 PROCS: dict[str, subprocess.Popen] = {}
 
 
@@ -42,7 +47,10 @@ def run_dir(run_id: str) -> Path:
 
 def derive(config_path: str, goal: str | None, audience: str | None, journeys: list[str] | None) -> dict:
     """The config for one run: the file as is, narrowed to some journeys, an ad-hoc goal, an audience."""
-    cfg = load(config_path)
+    try:
+        cfg = load(config_path)
+    except (OSError, ValueError, yaml.YAMLError):  # parse errors quote the file: never echo them
+        raise ValueError(BAD_CONFIG) from None
     if journeys:
         unknown = sorted(set(journeys) - {j.name for j in cfg.journeys})
         if unknown:
@@ -57,8 +65,36 @@ def derive(config_path: str, goal: str | None, audience: str | None, journeys: l
     if audience:
         cfg.personas.audience = ' '.join(audience.split())[:1000]
     data = cfg.model_dump(mode='json')
-    Config.model_validate(data)
+    try:
+        Config.model_validate(data)
+    except ValueError:
+        raise ValueError('the config is not valid with these goal, audience and journeys') from None
     return data
+
+
+def allowed_config(config_path: str) -> Path:
+    """The resolved path, which must be listed in SWARM_PERSONA_CONFIGS when that is set."""
+    path = Path(config_path).expanduser().resolve()
+    allow = [p for p in os.environ.get('SWARM_PERSONA_CONFIGS', '').split(os.pathsep) if p.strip()]
+    if allow and path not in {Path(p).expanduser().resolve() for p in allow}:
+        raise ValueError('config_path is not one of the configs listed in SWARM_PERSONA_CONFIGS')
+    return path
+
+
+def run_cwd(config: Path) -> str:
+    """Where the run starts, so relative paths in the config resolve: its git root, else its folder."""
+    try:
+        top = subprocess.run(['git', '-C', str(config.parent), 'rev-parse', '--show-toplevel'],
+                             capture_output=True, text=True, check=False, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return str(config.parent)
+    return top.stdout.strip() if top.returncode == 0 and top.stdout.strip() else str(config.parent)
+
+
+def guard_summary(data: dict) -> dict:
+    guard = data.get('guard') or {}
+    return {'allowed_writes': len(guard.get('allowed_writes') or []), 'allow_delete': bool(guard.get('allow_delete')),
+            'self_test': len(guard.get('self_test') or []), 'preflight': len(data.get('preflight') or [])}
 
 
 def alive(pid: int) -> bool:
@@ -91,6 +127,26 @@ def state_of(path: Path, meta: dict) -> str:
     return 'closed' if meta.get('closed') else 'ended'
 
 
+def save_meta(path: Path, meta: dict) -> None:
+    (path / 'run.json').write_text(json.dumps(meta, indent=2))
+
+
+def escalate(path: Path, meta: dict, state: str) -> str:
+    """SIGKILL a run that is still alive KILL_AFTER seconds after close sent SIGTERM."""
+    if state != 'closing' or meta.get('killed') or time.time() - meta['closed'] < KILL_AFTER:
+        return state
+    os.kill(meta['pid'], signal.SIGKILL)
+    meta['killed'] = time.time()
+    save_meta(path, meta)
+    return 'killed'
+
+
+def runs() -> list[tuple[Path, dict]]:
+    home = runs_home()
+    paths = sorted((p for p in home.iterdir() if (p / 'run.json').exists()), reverse=True) if home.exists() else []
+    return [(p, read_meta(p)) for p in paths]
+
+
 def progress(path: Path) -> dict:
     """Personas planned and walks finished per target, read from the run's log."""
     log = (path / 'run.log').read_text(errors='replace') if (path / 'run.log').exists() else ''
@@ -102,36 +158,48 @@ def progress(path: Path) -> dict:
             'log_tail': log.strip().splitlines()[-5:]}
 
 
+def spawn(argv: list[str], log, cwd: str, env: dict) -> subprocess.Popen:
+    """The CLI in its own session, its stdin closed and its output in run.log, never on the MCP pipe."""
+    return subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, cwd=cwd, env=env,
+                            start_new_session=True)
+
+
 def start(config_path: str, goal: str | None = None, audience: str | None = None,
           journeys: list[str] | None = None) -> dict:
     """Start a persona swarm run in the background and return its run_id. config_path is a
     swarm-persona.yml; goal adds an ad-hoc journey (replacing the configured ones unless journeys
     names some to keep); audience describes who uses the app; journeys picks configured journeys by
-    name. The write guard and preflight run as always. Poll with status, read with findings."""
-    config = Path(config_path).expanduser().resolve()
+    name. The write guard and preflight run as always; the result summarizes the guard. At most two
+    runs at a time. Poll with status, read with findings."""
+    config = allowed_config(config_path)
     data = derive(str(config), goal, audience, journeys)
+    active = [m['run_id'] for p, m in runs() if state_of(p, m) in ('running', 'closing')]
+    if len(active) >= MAX_RUNNING:
+        raise ValueError(f'{len(active)} runs are already running ({", ".join(active)}); '
+                         f'at most {MAX_RUNNING} at a time. Wait for one, or close it.')
+    cwd = run_cwd(config)
     run_id = time.strftime('%Y%m%d-%H%M%S') + '-' + secrets.token_hex(3)
     path = runs_home() / run_id
     path.mkdir(parents=True, mode=0o700)
     (path / 'config.yml').write_text(yaml.safe_dump(data, sort_keys=False))
     argv = [sys.executable, '-m', 'swarm_persona.cli', 'run', '--config', str(path / 'config.yml'),
             '--out', str(path / 'out')]
+    os.close(os.open(path / 'auth.log', os.O_WRONLY | os.O_CREAT, 0o600))
+    env = {**os.environ, 'SWARM_PERSONA_AUTH_LOG': str(path / 'auth.log')}
     with open(path / 'run.log', 'wb') as log:
-        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
-                                cwd=os.getcwd(), start_new_session=True)
+        proc = spawn(argv, log, cwd, env)
     PROCS[run_id] = proc
-    meta = {'run_id': run_id, 'pid': proc.pid, 'config': str(config), 'goal': goal, 'audience': audience,
-            'journeys': journeys, 'started': time.time(), 'cwd': os.getcwd()}
-    (path / 'run.json').write_text(json.dumps(meta, indent=2))
-    return {'run_id': run_id, 'state': 'running', 'dir': str(path)}
+    save_meta(path, {'run_id': run_id, 'pid': proc.pid, 'config': str(config), 'goal': goal, 'audience': audience,
+                     'journeys': journeys, 'started': time.time(), 'cwd': cwd})
+    return {'run_id': run_id, 'state': 'running', 'dir': str(path), 'cwd': cwd, 'guard': guard_summary(data)}
 
 
 def status(run_id: str) -> dict:
-    """State (running, closing, passed, gate-failed, error, closed, finished, ended), elapsed seconds
+    """State (running, closing, killed, passed, gate-failed, error, closed, finished, ended), elapsed seconds
     and personas done per target, as far as the run's log shows them."""
     path = run_dir(run_id)
     meta = read_meta(path)
-    state = state_of(path, meta)
+    state = escalate(path, meta, state_of(path, meta))
     end = (path / 'exit_code').stat().st_mtime if (path / 'exit_code').exists() else time.time()
     return {'run_id': run_id, 'state': state, 'elapsed_seconds': round(end - meta['started']), **progress(path)}
 
@@ -155,30 +223,44 @@ def findings(run_id: str) -> dict:
 
 def list_runs() -> list[dict]:
     """Known runs, newest first."""
-    home = runs_home()
-    paths = sorted((p for p in home.iterdir() if (p / 'run.json').exists()), reverse=True) if home.exists() else []
-    out = []
-    for path in paths[:50]:
-        meta = read_meta(path)
-        out.append({'run_id': meta['run_id'], 'state': state_of(path, meta), 'started': meta['started'],
-                    'config': meta['config'], 'goal': meta.get('goal')})
-    return out
+    return [{'run_id': m['run_id'], 'state': escalate(p, m, state_of(p, m)), 'started': m['started'],
+             'config': m['config'], 'goal': m.get('goal')} for p, m in runs()[:50]]
+
+
+def prune(older_than_days: float = 7) -> dict:
+    """Delete the directories (logs, screenshots, evidence) of runs started more than older_than_days
+    ago. Running runs are kept."""
+    if older_than_days < 0:
+        raise ValueError('older_than_days must be 0 or more')
+    cutoff, removed, kept = time.time() - older_than_days * 86400, [], []
+    for path, meta in runs():
+        if meta['started'] > cutoff:
+            continue
+        if state_of(path, meta) in ('running', 'closing'):
+            kept.append(meta['run_id'])
+            continue
+        shutil.rmtree(path)
+        PROCS.pop(meta['run_id'], None)
+        removed.append(meta['run_id'])
+    return {'removed': removed, 'kept_running': kept}
 
 
 def close(run_id: str) -> dict:
-    """Stop a running run: SIGTERM, which the CLI unwinds (proxies stop, sign-out runs)."""
+    """Stop a running run: SIGTERM, which the CLI unwinds (proxies stop, sign-out runs). If it is
+    still alive 150 seconds later, the next status, list_runs or close sends SIGKILL."""
     path = run_dir(run_id)
     meta = read_meta(path)
-    state = state_of(path, meta)
+    state = escalate(path, meta, state_of(path, meta))
     if state != 'running':
         return {'run_id': run_id, 'state': state, 'message': 'not running'}
     os.kill(meta['pid'], signal.SIGTERM)
     meta['closed'] = time.time()
-    (path / 'run.json').write_text(json.dumps(meta, indent=2))
+    save_meta(path, meta)
     return {'run_id': run_id, 'state': 'closing'}
 
 
-TOOLS = {'test': start, 'status': status, 'findings': findings, 'list_runs': list_runs, 'close': close}
+TOOLS = {'test': start, 'status': status, 'findings': findings, 'list_runs': list_runs, 'close': close,
+         'prune': prune}
 
 
 def build():

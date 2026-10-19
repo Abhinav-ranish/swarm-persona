@@ -213,17 +213,28 @@ claude mcp add swarm-persona -- swarm-persona mcp
 
 | Tool | What it does |
 |---|---|
-| `test(config_path, goal?, audience?, journeys?)` | starts `swarm-persona run` in the background and returns a `run_id`. `journeys` keeps only the named journeys; `goal` adds an ad-hoc journey (it replaces the configured ones unless `journeys` names some to keep) and must pass the forbidden-words filter; `audience` sets `personas.audience` |
-| `status(run_id)` | state (`running`, `closing`, `passed`, `gate-failed`, `error`, `closed`), elapsed seconds, personas planned and done per target, the last log lines |
+| `test(config_path, goal?, audience?, journeys?)` | starts `swarm-persona run` in the background and returns a `run_id` and a guard summary (allowed writes, whether DELETE is allowed, self-test requests, preflight checks). `journeys` keeps only the named journeys; `goal` adds an ad-hoc journey (it replaces the configured ones unless `journeys` names some to keep) and must pass the forbidden-words filter; `audience` sets `personas.audience`. At most two runs at a time |
+| `status(run_id)` | state (`running`, `closing`, `killed`, `passed`, `gate-failed`, `error`, `closed`), elapsed seconds, personas planned and done per target, the last log lines |
 | `findings(run_id)` | the run's `report.json`: gate, summary, per-persona verdicts, worked-well notes, findings |
 | `list_runs()` | known runs, newest first |
-| `close(run_id)` | SIGTERM, which the CLI unwinds: proxies stop and the sign-out command runs |
+| `close(run_id)` | SIGTERM, which the CLI unwinds: proxies stop and the sign-out command runs. If the run is still alive 150 seconds later, the next `status`, `list_runs` or `close` sends SIGKILL |
+| `prune(older_than_days)` | deletes the directories of runs older than that (default 7 days), keeping running ones |
 
 Each run lives in `~/.swarm-persona/runs/<run_id>/` (`SWARM_PERSONA_HOME` moves it): the config
-it ran with, `run.log`, and `out/` with the usual report and evidence. The server only wraps the
-CLI, so the guard self-test, preflight and budgets apply exactly as on the command line. Relative
-paths in the config (an auth helper script) resolve against the directory the server was started
-in, which for Claude Code is the project.
+it ran with, `run.log`, `auth.log` and `out/` with the usual report and evidence. The auth
+command's output goes to `auth.log` (mode 0600), never to `run.log`, and no tool returns it. The
+server only wraps the CLI, so the guard self-test, preflight and budgets apply exactly as on the
+command line. The run starts in the config's git root (or its folder, outside a repository), so
+relative paths in the config, such as an auth helper script, resolve the same way as from the
+repository; `run.json` records it.
+
+A config that fails to load gets one generic error, never its parse error, so the tool cannot be
+used to read other files. To limit which configs an MCP client may run at all, set
+`SWARM_PERSONA_CONFIGS` to the allowed paths, separated by `:` (`;` on Windows):
+
+```bash
+claude mcp add swarm-persona -e SWARM_PERSONA_CONFIGS="$PWD/swarm-persona.yml" -- swarm-persona mcp
+```
 
 ## The write guard
 

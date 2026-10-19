@@ -40,7 +40,12 @@ class Session:
         # Only the three placeholders are replaced: braces anywhere else (JSON) are left alone.
         argv = [re.sub(r'\{(url|state|tokens)\}', lambda m: self.vars[m.group(1)], part)
                 for part in shlex.split(template)]
-        subprocess.run(argv, check=True)
+        log = os.environ.get('SWARM_PERSONA_AUTH_LOG')  # set by the MCP server: keep it out of run.log
+        if not log:
+            subprocess.run(argv, check=True)
+            return
+        with os.fdopen(os.open(log, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600), 'ab') as out:
+            subprocess.run(argv, check=True, stdout=out, stderr=out)
 
     def __enter__(self) -> 'Session':
         if self.cfg.auth.command:
