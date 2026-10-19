@@ -3,182 +3,106 @@
     "id": "agent-no-future-annotations",
     "kind": "gotcha",
     "text": "Never add `from __future__ import annotations` to agent.py. It turns the custom actions' type hints into strings, browser-use then cannot see browser_session and refuses to register report_issue and open_page, and every persona fails before its agent runs. v0.1.0 shipped exactly this and reported zero sessions; v0.1.1 fixed it. Linters and \"modernise\" passes add the import automatically: check the diff.",
-    "paths": [
-      "src/swarm_persona/agent.py"
-    ],
+    "paths": ["src/swarm_persona/agent.py"],
     "created": "2026-10-19",
     "source": "911f79a",
-    "tags": [
-      "browser-use",
-      "annotations",
-      "v0.1.0"
-    ]
+    "tags": ["browser-use", "annotations", "v0.1.0"]
   },
   {
     "id": "mcp-no-future-annotations",
     "kind": "gotcha",
     "text": "mcp_server.py must not use `from __future__ import annotations` either: the MCP SDK builds each tool's input schema from the function's real annotations. Same failure class as agent.py, different library.",
-    "paths": [
-      "src/swarm_persona/mcp_server.py"
-    ],
+    "paths": ["src/swarm_persona/mcp_server.py"],
     "created": "2026-10-19",
     "source": "d44babb",
-    "tags": [
-      "mcp",
-      "annotations"
-    ]
+    "tags": ["mcp", "annotations"]
   },
   {
     "id": "walk-must-report-crashes",
     "kind": "gotcha",
     "text": "walk() once dropped any persona whose task raised before its agent ran, so a broken setup (the v0.1.0 annotation bug) produced a run with no sessions that looked clean. A task exception must stay a crashed session row, and the all-crashed note must stay. Keep that when refactoring walk or adding new per-persona setup steps.",
-    "paths": [
-      "src/swarm_persona/run.py",
-      "tests/test_units.py"
-    ],
+    "paths": ["src/swarm_persona/run.py", "tests/test_units.py"],
     "created": "2026-10-19",
     "source": "911f79a",
-    "tags": [
-      "walk",
-      "crash"
-    ]
+    "tags": ["walk", "crash"]
   },
   {
     "id": "selftest-probe-host-not-app-host",
     "kind": "gotcha",
     "text": "The guard self-test's foreign-frame probe must use a host that is not an app host. A GET to an app host is a permitted read, so it would pass the guard, the self-test would see no 403 and refuse to start every run. probes() skips app hosts among example.org, example.net and iana.org; an app that lists all three would hit StopIteration. Any new probe needs the same care.",
-    "paths": [
-      "src/swarm_persona/guard/proxy.py",
-      "tests/test_guard_live.py"
-    ],
+    "paths": ["src/swarm_persona/guard/proxy.py", "tests/test_guard_live.py"],
     "created": "2026-10-19",
     "source": "bf3b558",
-    "tags": [
-      "guard",
-      "self-test"
-    ]
+    "tags": ["guard", "self-test"]
   },
   {
     "id": "python-312-required",
     "kind": "gotcha",
     "text": "The package needs Python 3.12 or newer: it nests same-quote f-strings (PEP 701), a SyntaxError at import on 3.11 and older. Every installer pins `--python 3.12` (action.yml, buildspec, test.sh). A stock macOS python3 is 3.9, which is why .brain/bin stays 3.9-compatible while the package does not.",
-    "paths": [
-      "pyproject.toml",
-      "action.yml",
-      "deploy/aws/buildspec.yml"
-    ],
+    "paths": ["pyproject.toml", "action.yml", "deploy/aws/buildspec.yml"],
     "created": "2026-10-19",
     "source": "bf3b558",
-    "tags": [
-      "python",
-      "f-string"
-    ]
+    "tags": ["python", "f-string"]
   },
   {
     "id": "write-tool-decodes-unicode-escapes",
     "kind": "gotcha",
     "text": "Agent file-writing tools decode backslash-u escapes in the text they write, so a test or doc that needs the literal six characters (the guard's escaped-key cases in test_policy.py, the README's escaped publish_at example) silently gets the decoded character instead. Build such strings with chr(92) in code, and check the bytes on disk (grep -c, xxd) after writing.",
-    "paths": [
-      "tests/test_policy.py",
-      "README.md"
-    ],
+    "paths": ["tests/test_policy.py", "README.md"],
     "created": "2026-10-19",
     "source": "owner",
-    "tags": [
-      "unicode",
-      "escape",
-      "tooling"
-    ]
+    "tags": ["unicode", "escape", "tooling"]
   },
   {
     "id": "chromium-background-requests",
     "kind": "gotcha",
     "text": "Despite the QUIET flags, Chromium still sends about 50 requests per run to Google hosts (component updates, safe browsing, sign-in). The guard refuses them and the report folds them into one count of requests to other sites. They are not app findings and not a guard leak. Follow-up: plans/chromium-background-noise.md.",
-    "paths": [
-      "src/swarm_persona/agent.py",
-      "src/swarm_persona/checks.py",
-      "src/swarm_persona/report.py"
-    ],
+    "paths": ["src/swarm_persona/agent.py", "src/swarm_persona/checks.py", "src/swarm_persona/report.py"],
     "created": "2026-10-19",
     "source": "9c5ae31",
-    "tags": [
-      "chromium",
-      "guard",
-      "noise"
-    ]
+    "tags": ["chromium", "guard", "noise"]
   },
   {
     "id": "branch-and-tag-share-a-name",
     "kind": "gotcha",
     "text": "Never create a branch with the same name as a tag (for example a branch called v0.2.0). Then `git push origin v0.2.0` is ambiguous and some commands pick the tag, others the branch. Push tags by full ref: `git push origin refs/tags/vX.Y.Z`.",
-    "paths": [
-      ".brain/release.md"
-    ],
+    "paths": [".brain/release.md"],
     "created": "2026-10-19",
     "source": "owner",
-    "tags": [
-      "git",
-      "tag",
-      "release"
-    ]
+    "tags": ["git", "tag", "release"]
   },
   {
     "id": "fingerprint-is-public-contract",
     "kind": "gotcha",
     "text": "Finding fingerprints are a public contract: tickets hashes each one into the hidden marker of every GitHub issue it files, in users' repositories. Changing what goes into one (agent_fingerprint, the signal and journey fingerprints, checks.normalize, issue_key) changes every marker, and the next `tickets --github-issues` files every ticket again. 0.2.0 did this once, on purpose, with an upgrade note in the README Changes section. Any further change needs the same: a release note and a minor version bump.",
-    "paths": [
-      "src/swarm_persona/judge.py",
-      "src/swarm_persona/checks.py",
-      "src/swarm_persona/tickets.py"
-    ],
+    "paths": ["src/swarm_persona/judge.py", "src/swarm_persona/checks.py", "src/swarm_persona/tickets.py"],
     "created": "2026-10-19",
     "source": "a50c885",
-    "tags": [
-      "fingerprint",
-      "tickets",
-      "compatibility"
-    ]
+    "tags": ["fingerprint", "tickets", "compatibility"]
   },
   {
     "id": "hygiene-tests-skip-on-codebuild",
     "kind": "gotcha",
     "text": "The 8 gitignore tests in test_repo_hygiene.py (7 check-ignore cases plus the .env.example one) skip on CodeBuild, because deploy/aws/test.sh uploads a zip with no .git. A green CodeBuild run proves nothing about .gitignore; after touching it, also run `uv run --python 3.12 --extra dev pytest tests/test_repo_hygiene.py` locally.",
-    "paths": [
-      "tests/test_repo_hygiene.py",
-      "deploy/aws/test.sh",
-      ".gitignore"
-    ],
+    "paths": ["tests/test_repo_hygiene.py", "deploy/aws/test.sh", ".gitignore"],
     "created": "2026-10-19",
     "source": "7385137",
-    "tags": [
-      "codebuild",
-      "gitignore",
-      "skip"
-    ]
+    "tags": ["codebuild", "gitignore", "skip"]
   },
   {
     "id": "no-other-product-names",
     "kind": "gotcha",
     "text": "test_no_file_names_other_products fails on any file in the tree, .brain included, that names certain other products (the FORBIDDEN pattern in test_repo_hygiene.py, split so grep does not find it). In this repo, call the consumer \"the downstream app\" and the project swarm-persona grew out of \"an internal UX swarm\".",
-    "paths": [
-      "tests/test_repo_hygiene.py",
-      "README.md"
-    ],
+    "paths": ["tests/test_repo_hygiene.py", "README.md"],
     "created": "2026-10-19",
     "source": "6d769ff",
-    "tags": [
-      "hygiene",
-      "naming"
-    ]
+    "tags": ["hygiene", "naming"]
   },
   {
     "id": "walk-must-report-timeouts",
     "kind": "gotcha",
-    "text": "walk() also dropped personas still pending at budget.timeout_minutes (v0.2.0), so a run where half the swarm timed out reported 2/2 completed. A cut-off task must stay a session row with timed_out, and the judge keeps timed-out sessions out of the journey rule on both sides, like crashes: the timeout is one clock for the whole target and some personas never start.",
-    "paths": [
-      "src/swarm_persona/run.py",
-      "src/swarm_persona/judge.py"
-    ],
+    "text": "walk() also dropped personas still pending at budget.timeout_minutes (v0.2.0), so a run where half the swarm timed out reported 2/2 completed. A cut-off task must stay a session row with timed_out, and the judge keeps timed-out sessions out of the journey rule on both sides, like crashes: the timeout is one clock for the whole target and some personas never start. A baseline whose personas all crashed or timed out did not run (run.baseline_ran), or every preview finding is classified new.",
+    "paths": ["src/swarm_persona/run.py", "src/swarm_persona/judge.py"],
     "created": "2026-10-19",
     "source": "fix/timed-out-personas"
   }

@@ -9,7 +9,7 @@ from swarm_persona import agent, run
 from swarm_persona.agent import Outcome, read_outcome
 from swarm_persona.config import Config
 from swarm_persona.judge import judge, outcome
-from swarm_persona.run import replay, walk
+from swarm_persona.run import baseline_ran, replay, walk
 
 FIXTURE = Path(__file__).parent / 'fixtures' / 'run' / 'evidence.json'
 
@@ -167,7 +167,8 @@ def test_walk_records_personas_cut_off_at_the_timeout(monkeypatch, tmp_path):
             await asyncio.sleep(60)
         except asyncio.CancelledError:
             if persona['id'] == 3:  # gave back what it had when it was cancelled
-                return {**result, 'steps': 7, 'tokens': 50, 'issues': [{'title': 'half-seen'}]}
+                return {**result, 'steps': 7, 'tokens': 50, 'issues': [{'title': 'half-seen'}],
+                        'server_errors': [{'method': 'GET', 'path': '/x', 'status': 502}]}
             raise
         return result
 
@@ -187,6 +188,13 @@ def test_walk_records_personas_cut_off_at_the_timeout(monkeypatch, tmp_path):
         assert s['timed_out'] and s['timeout_minutes'] == 30 and not s['achieved'] and not s['crashed']
         assert s['verdict'] == 'TIMED OUT: cut off at the 30-minute timeout' and s['issues'] == []
     assert [(s['steps'], s['tokens']) for s in sessions[1:]] == [(0, 0), (7, 50), (0, 0)]
+    assert [len(s['server_errors']) for s in sessions] == [0, 0, 1, 0]  # a 5xx it saw is still evidence
     assert notes == ['Timeout: 3 persona run(s) on preview were cut off at 30 minutes.']
     ev = evidence(sessions=[{k: v for k, v in s.items() if k != 'issues'} for s in sessions])
-    assert judge(ev, ['blocker'])['summary'] == '1/4 personas completed; 3 timed out; 0 issues'
+    assert judge(ev, ['blocker'])['summary'] == '1/4 personas completed; 3 timed out; 1 issue'  # the 5xx
+
+
+def test_a_baseline_that_only_crashed_or_timed_out_did_not_run():
+    assert not baseline_ran([session('preview', 1), cut_off('baseline', 1), session('baseline', 2, crashed=True)])
+    assert baseline_ran([cut_off('baseline', 1), session('baseline', 2, achieved=False)])
+    assert not baseline_ran([session('preview', 1)])

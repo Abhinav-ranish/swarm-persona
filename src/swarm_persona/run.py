@@ -134,7 +134,8 @@ async def walk(cfg: Config, ctx: dict, personas: list[dict], label: str, origin:
                             'achieved': False, 'crashed': False, 'timed_out': True, 'timeout_minutes': minutes,
                             'done': False, 'success': None, 'worked_well': [],
                             'steps': (known or {}).get('steps', 0), 'tokens': (known or {}).get('tokens', 0),
-                            'seconds': minutes * 60, 'issues': [], 'guard_blocked': [], 'server_errors': []})
+                            'seconds': minutes * 60, 'issues': [], 'guard_blocked': (known or {}).get('guard_blocked', []),
+                            'server_errors': (known or {}).get('server_errors', [])})
             continue
         if task.exception():  # a persona that broke before its agent ran is reported, never dropped
             error = task.exception()
@@ -148,6 +149,12 @@ async def walk(cfg: Config, ctx: dict, personas: list[dict], label: str, origin:
     if personas and results and all(r['crashed'] for r in results):
         notes.append(f'Every persona on {label} crashed; nothing was walked. See the Sessions table.')
     return results
+
+
+def baseline_ran(sessions: list[dict]) -> bool:
+    """A baseline whose personas all crashed or were cut off walked nothing, so it cannot classify a
+    preview finding as new or pre-existing."""
+    return any(s['target'] == 'baseline' and not s.get('crashed') and not s.get('timed_out') for s in sessions)
 
 
 async def run(cfg: Config, *, out: Path, pr: str | None = None, pr_context_file: str | None = None,
@@ -218,7 +225,7 @@ async def run(cfg: Config, *, out: Path, pr: str | None = None, pr_context_file:
     spent['tokens'] += tokens
     if merged is None:
         notes.append('The merge pass reply was unusable, so every raw report is listed unmerged.')
-    evidence = {'meta': meta, 'baseline_ran': any(s['target'] == 'baseline' for s in sessions),
+    evidence = {'meta': meta, 'baseline_ran': baseline_ran(sessions),
                 'ctx': {'title': ctx['title'], 'files': ctx['files']}, 'personas': personas,
                 'checks': checks, 'sessions': [{k: v for k, v in s.items() if k != 'issues'} for s in sessions],
                 'raw_issues': raw, 'merge': merged}
