@@ -187,8 +187,10 @@ swarm-persona tickets out/ --github-issues --repo acme/notes --label ux --label 
 ```
 
 `tickets.json` holds one ticket per finding fingerprint: title, severity, classification, steps to
-reproduce, personas, screenshot names, the possible fix if any, and the fingerprint
-(`--min-severity`, default minor). Findings are rebuilt from `evidence.json` the way `replay` does,
+reproduce, personas, screenshot names, possible fixes, and the fingerprint. An agent finding's
+fingerprint is its sources' journey, page and category, never the persona's wording, so it holds
+from run to run; two findings of one run that share it become one ticket listing every title and
+detail (`--min-severity`, default minor). Findings are rebuilt from `evidence.json` the way `replay` does,
 so a run from an older version works too. `--github-issues` opens a GitHub Issue for each ticket
 through the same client as the PR comment (`gh` token, `GH_TOKEN`, or `--github-app` with Issues
 write). Each issue carries a hidden marker with a hash of the fingerprint, and the issues you opened
@@ -319,6 +321,14 @@ sign-out command runs.
   already had one of the same category reads as pre-existing.
 - The baseline must accept the same test account as the preview. Where test accounts only exist in
   production, leave `baseline_url` out and read findings as unclassified.
+
+## Changes
+
+**0.2.0.** MCP server, audience and saved personas, per-persona verdicts, `tickets`, possible
+fixes (opt-in). Upgrading from 0.1.x: agent findings now have fingerprints made only from the
+sources' journey, page and category, so the ticket marker for an agent finding is different from
+any made before. The first `tickets --github-issues` after upgrading files each agent ticket once
+more; close the older duplicates by hand. Signal and journey tickets are unaffected.
 
 ## Credits
 

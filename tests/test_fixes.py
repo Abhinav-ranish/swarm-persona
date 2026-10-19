@@ -63,8 +63,8 @@ def test_one_capped_call_per_new_or_unclassified_major_finding_counted_in_the_bu
     spent, notes = {'tokens': 0}, []
     out = asyncio.run(fixes.suggest(cfg(fix_max_tokens=300), findings(), DIFF, spent, notes))
     [blocker] = [f for f in findings() if f['severity'] == 'blocker']
-    assert list(out) == [blocker['fingerprint']] and len(calls) == 1  # minor console and copy findings skipped
-    assert out[blocker['fingerprint']] == {'file': 'src/app/write/page.tsx', 'change': 'Remove hidden.'}
+    assert list(out) == [blocker['key']] and len(calls) == 1  # minor console and copy findings skipped
+    assert out[blocker['key']] == {'file': 'src/app/write/page.tsx', 'change': 'Remove hidden.'}
     prompt, max_tokens = calls[0]
     assert max_tokens == 300 and 'pay.ts' not in prompt and 'Save hidden' in prompt
     assert spent['tokens'] == 100 and notes == []
@@ -185,3 +185,21 @@ def test_an_error_in_the_fix_step_never_loses_the_run(tmp_path, monkeypatch):
     monkeypatch.setattr(run_mod, 'pr_diff', lambda *a: (_ for _ in ()).throw(ValueError('bad json')))
     assert asyncio.run(run_mod.add_fixes(cfg(), ev, '7', None, {'tokens': 0}, notes)) == {}
     assert asyncio.run(run_mod.add_fixes(cfg(suggest_fixes=False), ev, '7', None, {'tokens': 0}, [])) == {}
+
+
+def test_each_finding_gets_its_own_fix_even_when_fingerprints_collide(monkeypatch, tmp_path):
+    from evidence_builder import issue as raw_issue
+
+    replies = iter([{'file': None, 'change': 'Fix the save handler.'}, {'file': None, 'change': 'Narrow the sidebar.'}])
+
+    async def complete(llm, prompt, max_tokens=12000):
+        return json.dumps(next(replies)), 10
+
+    monkeypatch.setattr(fixes, 'complete', complete)
+    ev = evidence(raw=[raw_issue('preview', 1, title='Save does nothing', detail='a'),
+                       raw_issue('preview', 2, title='Sidebar covers text', detail='b')], baseline_ran=False)
+    found = [f for f in judge(ev, ['blocker'])['findings'] if f['source'] == 'agent']
+    assert found[0]['fingerprint'] == found[1]['fingerprint']
+    ev['fixes'] = asyncio.run(fixes.suggest(cfg(), found, DIFF, {'tokens': 0}, []))
+    rejudged = {f['title']: f['possible_fix']['change'] for f in judge(ev, ['blocker'])['findings'] if f['source'] == 'agent'}
+    assert rejudged == {'Save does nothing': 'Fix the save handler.', 'Sidebar covers text': 'Narrow the sidebar.'}

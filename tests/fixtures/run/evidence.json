@@ -262,7 +262,7 @@
     ]
   },
   "fixes": {
-    "signal|write|selector|button:has-text('save') is not actionable (covered or detached)": {
+    "241f0c05366ab466": {
       "file": "src/app/write/page.tsx",
       "change": "Give the cookie bar a lower z-index than the Save button, see @octocat."
     }

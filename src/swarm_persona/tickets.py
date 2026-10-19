@@ -38,29 +38,37 @@ def steps(finding: dict, goals: dict[str, str]) -> list[str]:
     return out
 
 
+def add_new(items: list, more) -> None:
+    items += [x for x in more if x not in items]
+
+
 def build(out: Path, min_severity: str = 'polish') -> list[dict]:
     """One ticket per fingerprint, from findings rebuilt out of evidence.json the way replay does
-    (report.json may come from an older version without fingerprints)."""
+    (report.json may come from an older version without fingerprints). Findings that share a
+    fingerprint merge into one ticket that keeps every title, detail, step, persona and screenshot."""
     evidence = json.loads((out / 'evidence.json').read_text())
     meta = evidence.get('meta', {})
     findings = judge(evidence, meta.get('fail_on') or ['blocker'])['findings']
     goals = {s['journey']: s['goal'] for s in evidence.get('sessions', []) if s.get('journey')}
     tickets: dict[str, dict] = {}
-    for f in findings:
+    for f in findings:  # most important first, so the first of a fingerprint sets title and status
         if rank(f['severity']) > rank(min_severity):
             continue
-        if f['fingerprint'] in tickets:
-            t = tickets[f['fingerprint']]
-            t['personas'] = sorted(set(t['personas']) | set(f['personas']))
-            t['screenshots'] += [Path(s).name for s in f['screenshots'] if Path(s).name not in t['screenshots']]
-            continue
-        tickets[f['fingerprint']] = {
+        t = tickets.setdefault(f['fingerprint'], {
             'id': ticket_id(f['fingerprint']), 'fingerprint': f['fingerprint'], 'title': f['title'],
-            'severity': f['severity'], 'classification': f['classification'], 'journey': f.get('journey'),
-            'devices': f['devices'], 'detail': f['detail'], 'steps': steps(f, goals),
-            'personas': f['personas'], 'screenshots': [Path(s).name for s in f['screenshots']],
-            'possible_fix': f.get('possible_fix'), 'run_id': meta.get('run_id'),
-        }
+            'titles': [], 'severity': f['severity'], 'classification': f['classification'],
+            'journey': f.get('journey'), 'devices': [], 'details': [], 'steps': [], 'personas': [],
+            'screenshots': [], 'possible_fixes': [], 'run_id': meta.get('run_id'),
+        })
+        if rank(f['severity']) < rank(t['severity']):
+            t['severity'] = f['severity']
+        add_new(t['titles'], [f['title']])
+        add_new(t['details'], [f['detail']])
+        add_new(t['steps'], steps(f, goals))
+        add_new(t['devices'], f['devices'])
+        add_new(t['personas'], f['personas'])
+        add_new(t['screenshots'], [Path(s).name for s in f['screenshots']])
+        add_new(t['possible_fixes'], [f['possible_fix']] if f.get('possible_fix') else [])
     return list(tickets.values())
 
 
@@ -71,16 +79,18 @@ def write_json(out: Path, tickets: list[dict]) -> Path:
 
 
 def issue_body(t: dict, version: str | None = None) -> str:
-    fix = t.get('possible_fix')
     lines = [MARKER.format(t['id']),
              (f"**{t['severity']}**, {t['classification']}, journey {safe(t['journey'] or '-', 60)}, "
-              f"{'/'.join(t['devices']) or 'any device'}"), '', safe(t['detail'], 1500), '',
-             '**Steps to reproduce**', *[f'{n}. {safe(s, 400)}' for n, s in enumerate(t['steps'], 1)], '']
+              f"{'/'.join(t['devices']) or 'any device'}"), '']
+    if len(t['titles']) > 1:
+        lines += ['Reported as:', *[f'- {safe(x, 120)}' for x in t['titles']], '']
+    lines += [*[safe(d, 1500) + '\n' for d in t['details']],
+              '**Steps to reproduce**', *[f'{n}. {safe(s, 400)}' for n, s in enumerate(t['steps'], 1)], '']
     if t['personas']:
         lines += [f"Seen by: {', '.join(safe(p, 40) for p in t['personas'])}.", '']
     if t['screenshots']:
         lines += [f"Screenshots (the run's shots/ folder): {', '.join(safe(s, 80) for s in t['screenshots'][:6])}", '']
-    if fix:
+    for fix in t['possible_fixes']:
         place = f"in `{safe(fix['file'], 120)}`: " if fix.get('file') else ''
         lines += [f"Possible fix (unverified): {place}{safe(fix['change'], 800)}", '']
     lines.append(f"<sub>Filed by swarm-persona {safe(version or '', 20)} from run {safe(t.get('run_id') or '-', 40)}. "

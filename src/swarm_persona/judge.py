@@ -23,6 +23,7 @@ self-report.
 
 from __future__ import annotations
 
+import hashlib
 from collections import defaultdict
 from urllib.parse import urlsplit
 
@@ -120,12 +121,17 @@ def issue_key(issue: dict) -> tuple:
 
 
 def agent_fingerprint(src: list[dict]) -> str:
-    """Every source's (journey, page, category), sorted, plus the title of the source with the least
-    key, normalized: stable however the merge orders its sources, distinct for two problems of one
-    category on one page. The merge model's own title is not used, since it varies run to run."""
-    keyed = sorted(('|'.join(str(k) for k in issue_key(s)), normalize(s.get('title') or '')) for s in src)
-    keys = sorted({k for k, _ in keyed})
-    return 'agent|' + ';'.join(keys) + '|' + keyed[0][1]
+    """The sorted set of the sources' (journey, page, category): only deterministic inputs, so the same
+    problem keeps its fingerprint from run to run and whatever order the merge lists its sources in.
+    Titles are model prose and never part of it, so two findings of one run can share a fingerprint;
+    tickets merge them and fixes are keyed per finding (finding_key)."""
+    return 'agent|' + ';'.join(sorted({'|'.join(str(k) for k in issue_key(s)) for s in src}))
+
+
+def finding_key(finding: dict) -> str:
+    """Tells apart findings that share a fingerprint, and is the same on every replay of one evidence."""
+    text = '\n'.join([finding['fingerprint'], finding['title'] or '', finding['detail'] or ''])
+    return hashlib.sha256(text.encode()).hexdigest()[:16]
 
 
 def agent_findings(evidence: dict, hard_journeys: set[str]) -> list[dict]:
@@ -257,7 +263,8 @@ def judge(evidence: dict, fail_on: list[str], fail_on_unclassified: bool = False
     fixes = evidence.get('fixes') or {}
     for n, f in enumerate(findings, 1):
         f['id'] = n
-        f['possible_fix'] = fixes.get(f['fingerprint'])
+        f['key'] = finding_key(f)
+        f['possible_fix'] = fixes.get(f['key'])
     gating = [f for f in findings if f['severity'] in fail_on and (
         f['classification'] == 'new' or (f['classification'] == 'unclassified' and fail_on_unclassified))]
     verdicts = persona_verdicts(evidence)

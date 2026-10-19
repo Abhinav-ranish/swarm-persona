@@ -89,7 +89,7 @@ def parse(text: str, paths: list[str]) -> dict | None:
 
 
 async def suggest(cfg: Config, findings: list[dict], diff: str, spent: dict, notes: list[str]) -> dict[str, dict]:
-    """{finding fingerprint: {file, change}}. Each call's tokens count toward budget.max_tokens, and
+    """{finding key: {file, change}}. Each call's tokens count toward budget.max_tokens, and
     a call starts only when its whole reply cap still fits. One failed call skips that finding only."""
     if not cfg.report.suggest_fixes or not diff.strip():
         return {}
@@ -97,7 +97,7 @@ async def suggest(cfg: Config, findings: list[dict], diff: str, spent: dict, not
     out: dict[str, dict] = {}
     tried: set[str] = set()
     for finding in findings:
-        if not wanted(finding) or finding['fingerprint'] in tried:
+        if not wanted(finding) or finding['key'] in tried:
             continue
         globs = [g for name in (finding['journey'] or '').split(', ') if name in journeys for g in journeys[name].owns]
         text, paths = owned_diff(files, globs, cfg.report.fix_diff_chars)
@@ -109,7 +109,7 @@ async def suggest(cfg: Config, findings: list[dict], diff: str, spent: dict, not
         if spent['tokens'] + cfg.report.fix_max_tokens > cfg.budget.max_tokens:
             notes.append('Budget: possible fixes stopped, budget.max_tokens would be exceeded.')
             break
-        tried.add(finding['fingerprint'])
+        tried.add(finding['key'])
         try:
             reply, tokens = await complete(cfg.llm, prompt(finding, text), max_tokens=cfg.report.fix_max_tokens)
         except (Exception, SystemExit) as error:  # a missing API key raises SystemExit
@@ -118,5 +118,5 @@ async def suggest(cfg: Config, findings: list[dict], diff: str, spent: dict, not
         spent['tokens'] += tokens
         fix = parse(reply, paths)
         if fix:
-            out[finding['fingerprint']] = fix
+            out[finding['key']] = fix
     return out

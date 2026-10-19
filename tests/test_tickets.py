@@ -50,8 +50,8 @@ def test_tickets_json_has_one_ticket_per_fingerprint_with_steps_and_screenshots(
     assert agent['screenshots'] == ['preview-1-1.png'] and agent['personas'] == ['P1']
     assert agent['steps'] == ['Open /write on desktop.', 'Try to: g', 'Observe: Save button hidden behind cookie bar']
     assert agent['id'] == ticket_id(agent['fingerprint']) and agent['severity'] == 'blocker'
-    fixed = next(t for t in tickets if t['possible_fix'])
-    assert fixed['possible_fix']['file'] == 'src/app/write/page.tsx'
+    [fixed] = [t for t in tickets if t['possible_fixes']]
+    assert [x['file'] for x in fixed['possible_fixes']] == ['src/app/write/page.tsx']
     assert [t['severity'] for t in build(run_dir, 'blocker')] == ['blocker', 'blocker']
 
 
@@ -132,11 +132,25 @@ def test_tickets_ignore_an_old_report_json_and_rebuild_from_evidence(run_dir):
 
 def test_issue_text_is_defanged():
     t = {'id': 'a' * 16, 'fingerprint': 'agent|x', 'title': 'x', 'severity': 'major', 'classification': 'new',
-         'journey': 'j', 'devices': ['desktop'], 'detail': 'ping @octocat see https://evil.net and #12 <img src=x>',
-         'steps': ['Observe: [click](https://evil.net)'], 'personas': ['@admin'], 'screenshots': [],
-         'possible_fix': {'file': 'a.ts', 'change': 'call @team now'}, 'run_id': 'r'}
+         'journey': 'j', 'devices': ['desktop'], 'details': ['ping @octocat see https://evil.net and #12 <img src=x>'],
+         'titles': ['x', 'cc @lead'], 'steps': ['Observe: [click](https://evil.net)'], 'personas': ['@admin'],
+         'screenshots': [], 'possible_fixes': [{'file': 'a.ts', 'change': 'call @team now'}], 'run_id': 'r'}
     body = issue_body(t, '0.2.0')
     assert body.startswith(MARKER.format('a' * 16))
-    for bad in ('@octocat', '@admin', '@team', 'https://evil.net', ' #12', '<img', ']('):
+    for bad in ('@octocat', '@admin', '@team', '@lead', 'https://evil.net', ' #12', '<img', ']('):
         assert bad not in body
     assert 'Possible fix (unverified): in `a.ts`' in body
+
+
+def test_findings_sharing_a_fingerprint_become_one_ticket_that_keeps_both(tmp_path):
+    from evidence_builder import evidence, issue
+
+    raw = [issue('preview', 1, title='Save does nothing', detail='Clicked Save, nothing.', severity='minor'),
+           issue('preview', 2, title='Sidebar covers the editor', detail='The sidebar hides text.')]
+    (tmp_path / 'evidence.json').write_text(json.dumps(evidence(raw=raw, baseline_ran=False)))
+    [ticket] = build(tmp_path)
+    assert sorted(ticket['titles']) == ['Save does nothing', 'Sidebar covers the editor']
+    assert sorted(ticket['details']) == ['Clicked Save, nothing.', 'The sidebar hides text.']
+    assert ticket['personas'] == ['P2', 'P1'] and len(ticket['screenshots']) == 2 and ticket['severity'] == 'major'
+    body = issue_body(ticket)
+    assert 'Clicked Save, nothing.' in body and 'The sidebar hides text.' in body and 'Reported as:' in body

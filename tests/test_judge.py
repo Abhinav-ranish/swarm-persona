@@ -121,20 +121,22 @@ def agent_prints(result):
     return [f['fingerprint'] for f in result['findings'] if f['source'] == 'agent']
 
 
-def test_two_problems_of_one_category_on_one_page_get_distinct_fingerprints():
-    raw = [issue('preview', 1, title='Save button does nothing'), issue('preview', 2, title='Sidebar overlaps the editor')]
-    prints = agent_prints(judge(evidence(raw=raw, baseline_ran=False), ['blocker']))
-    assert len(set(prints)) == 2
+def test_an_agent_fingerprint_survives_new_title_wording_across_runs():
+    run1 = [issue('preview', 1, title='Save button does nothing'), issue('preview', 2, title='Save is dead',
+                                                                         url='https://app.example.com/w2')]
+    run2 = [issue('preview', 3, title='Clicking save has no effect at all'),
+            issue('preview', 4, title='Nothing happens on save', url='https://app.example.com/w2')]
 
-
-def test_an_agent_fingerprint_ignores_merge_order_and_the_merge_title():
-    a, b = issue('preview', 1, title='Save does nothing'), issue('preview', 2, title='Save is dead', url='https://app.example.com/w2')
-
-    def merged(raw, ids, title):
-        m = {'issues': [{'severity': 'major', 'category': 'ux', 'title': title, 'detail': 'd', 'source_ids': ids}],
+    def prints(raw, title):
+        m = {'issues': [{'severity': 'major', 'category': 'ux', 'title': title, 'detail': 'd', 'source_ids': [0, 1]}],
              'dropped': []}
         return agent_prints(judge(evidence(raw=raw, merge=m, baseline_ran=False), ['blocker']))
 
-    first = merged([a, b], [0, 1], 'Save broken')
-    assert first == merged([b, a], [0, 1], 'Saving fails') == merged([a, b], [1, 0], 'x')
-    assert first == ['agent|write|/w#|ux;write|/write|ux|save is dead']  # least key: /w# sorts before /write
+    assert prints(run1, 'Save broken') == prints(run2, 'Saving fails') == prints(run1[::-1], 'x')
+    assert prints(run1, 'x') == ['agent|write|/w#|ux;write|/write|ux']
+
+
+def test_findings_sharing_a_fingerprint_keep_distinct_keys():
+    raw = [issue('preview', 1, title='Save button does nothing'), issue('preview', 2, title='Sidebar overlaps the editor')]
+    found = [f for f in judge(evidence(raw=raw, baseline_ran=False), ['blocker'])['findings'] if f['source'] == 'agent']
+    assert len({f['fingerprint'] for f in found}) == 1 and len({f['key'] for f in found}) == 2
