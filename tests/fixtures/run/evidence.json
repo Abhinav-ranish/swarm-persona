@@ -9,7 +9,8 @@
     "fail_on": [
       "blocker"
     ],
-    "notes": []
+    "notes": [],
+    "max_steps": 25
   },
   "baseline_ran": true,
   "checks": [
@@ -109,11 +110,14 @@
       "verdict": "GAVE UP: stuck",
       "achieved": false,
       "crashed": false,
-      "steps": 5,
+      "steps": 25,
       "tokens": 100,
       "seconds": 10,
       "guard_blocked": [],
-      "server_errors": []
+      "server_errors": [],
+      "done": false,
+      "success": null,
+      "worked_well": []
     },
     {
       "id": 2,
@@ -140,7 +144,11 @@
           "reason": "body sets status=published"
         }
       ],
-      "server_errors": []
+      "server_errors": [],
+      "worked_well": [
+        "The editor opened quickly",
+        "Clear empty state on the list"
+      ]
     },
     {
       "id": 1,
@@ -160,7 +168,12 @@
       "tokens": 100,
       "seconds": 10,
       "guard_blocked": [],
-      "server_errors": []
+      "server_errors": [],
+      "done": true,
+      "success": true,
+      "worked_well": [
+        "Saving was instant"
+      ]
     },
     {
       "id": 2,
@@ -180,7 +193,12 @@
       "tokens": 100,
       "seconds": 10,
       "guard_blocked": [],
-      "server_errors": []
+      "server_errors": [],
+      "done": true,
+      "success": true,
+      "worked_well": [
+        "Saving was instant"
+      ]
     }
   ],
   "raw_issues": [

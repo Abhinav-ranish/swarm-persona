@@ -10,6 +10,8 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from pydantic import BaseModel, Field
+
 from .config import SEVERITIES, Config
 from .guard.proxy import GuardProxy
 from .llm import chat_model
@@ -57,7 +59,28 @@ GUARDRAILS = """Hard rules, no exceptions:
   problem. Look for: broken or confusing flows, dead ends, errors, unclear copy, missing feedback
   after an action, layout or overflow bugs, unreadable contrast, things that are slow, and
   anything that would make you give up.
-- Finish with a verdict that starts with ACHIEVED: or GAVE UP:, then the single worst moment."""
+- Finish with done. Set success true only if you met the goal (and its success criteria). The
+  verdict starts with ACHIEVED: or GAVE UP:, then the single worst moment. worked_well lists up to
+  three things that went smoothly for you, one short sentence each, or nothing."""
+
+
+class Outcome(BaseModel):
+    """The persona's structured final answer (browser-use's done action carries it)."""
+
+    verdict: str = Field(description='Starts with ACHIEVED: or GAVE UP:, then the single worst moment.')
+    worked_well: list[str] = Field(default_factory=list, description='Up to three things that went smoothly.')
+
+
+def read_outcome(final: str | None) -> tuple[str, list[str]]:
+    """The verdict text and the positive notes from the agent's final result, structured or not."""
+    if not final:
+        return 'GAVE UP: no verdict (ran out of steps or failed).', []
+    try:
+        outcome = Outcome.model_validate_json(final)
+    except ValueError:
+        return final, []
+    notes = [' '.join(str(n).split())[:200] for n in outcome.worked_well[:5]]
+    return outcome.verdict or 'GAVE UP: no verdict.', [n for n in notes if n]
 
 
 def task_prompt(cfg: Config, ctx: dict, persona: dict, origin: str) -> str:
@@ -145,18 +168,21 @@ async def run_persona(cfg: Config, ctx: dict, persona: dict, label: str, origin:
     agent = Agent(
         task=task_prompt(cfg, ctx, persona, origin), llm=chat_model(cfg.llm), tools=tools,
         browser_session=BrowserSession(browser_profile=profile), use_vision=True, max_failures=3,
-        calculate_cost=False, use_judge=False,
+        calculate_cost=False, use_judge=False, output_model_schema=Outcome,
     )
     started = time.time()
     try:
         history = await agent.run(max_steps=cfg.personas.max_steps)
-        verdict = history.final_result() or 'GAVE UP: no verdict (ran out of steps or failed).'
+        verdict, worked_well = read_outcome(history.final_result())
+        done, success = history.is_done(), history.is_successful()
         steps = len(history.history)
         tokens = history.usage.total_tokens if history.usage else 0
     except Exception as e:  # one broken persona must not sink the swarm
         verdict, steps, tokens = f'CRASHED: {type(e).__name__}: {str(e)[:200]}', 0, 0
+        worked_well, done, success = [], False, None
     return {**persona, 'target': label, 'verdict': ' '.join(str(verdict).split())[:600],
             'achieved': str(verdict).strip().upper().startswith('ACHIEVED'),
-            'crashed': str(verdict).startswith('CRASHED'), 'steps': steps, 'tokens': tokens or 0,
+            'crashed': str(verdict).startswith('CRASHED'), 'done': done, 'success': success,
+            'worked_well': worked_well, 'steps': steps, 'tokens': tokens or 0,
             'seconds': round(time.time() - started), 'issues': issues,
             'guard_blocked': proxy.records('guard'), 'server_errors': proxy.records('server')}

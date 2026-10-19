@@ -12,7 +12,8 @@ def session(target, pid, journey='write', device='desktop', achieved=True, **kw)
     base = {'id': pid, 'name': f'P{pid}', 'who': 'a tester', 'device': device, 'patience': 'medium',
             'journey': journey, 'goal': 'g', 'success_criteria': '', 'start_path': f'/{journey}',
             'target': target, 'verdict': 'ACHIEVED: fine' if achieved else 'GAVE UP: stuck',
-            'achieved': achieved, 'crashed': False, 'steps': 5, 'tokens': 100, 'seconds': 10,
+            'achieved': achieved, 'crashed': False, 'done': True, 'success': achieved, 'worked_well': [],
+            'steps': 5, 'tokens': 100, 'seconds': 10,
             'guard_blocked': [], 'server_errors': []}
     return {**base, **kw}
 
@@ -26,7 +27,7 @@ def issue(target, pid, journey='write', severity='major', category='ux', url='ht
 
 def evidence(checks=(), sessions=(), raw=(), merge=None, baseline_ran=True):
     return {'meta': {'title': 'Persona swarm', 'pr': '7', 'url': 'https://preview.example.com',
-                     'baseline_url': 'https://app.example.com', 'model': 'bedrock:test', 'version': '0.1.0',
+                     'baseline_url': 'https://app.example.com', 'model': 'bedrock:test', 'version': '0.1.0', 'max_steps': 25,
                      'fail_on': ['blocker'], 'notes': []},
             'baseline_ran': baseline_ran, 'checks': list(checks), 'sessions': list(sessions),
             'raw_issues': list(raw), 'merge': merge}

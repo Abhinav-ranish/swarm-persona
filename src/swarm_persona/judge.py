@@ -14,6 +14,11 @@ Severity is set by rules, never raised by a model:
 - an agent's report keeps the severity the persona gave it (the most severe, when several were
   merged), capped at major unless it is corroborated: two or more personas hit it, or a hard
   signal fired on the same journey. The merge model's own severity is ignored.
+
+Each persona also gets pass, fail or partial against its journey's success criteria, decided from
+the evidence (crashed, done and marked successful, hit max_steps, hard signals on its walk). Only
+when the evidence is silent does the persona's own ACHIEVED / GAVE UP verdict decide, labelled
+self-report.
 """
 
 from __future__ import annotations
@@ -171,6 +176,76 @@ def journey_findings(evidence: dict) -> list[dict]:
     return findings
 
 
+def walk_signals(evidence: dict) -> dict[tuple, set[str]]:
+    """Hard signal kinds per (target, journey, device): entry checks and 5xx seen mid-walk."""
+    fired: dict[tuple, set[str]] = defaultdict(set)
+    for c in evidence['checks']:
+        for s in signals(c):
+            if s['kind'] in HARD:
+                fired[(c['target'], c['journey'], c['device'])].add(s['kind'])
+    return fired
+
+
+def outcome(session: dict, fired: list[str], max_steps: int | None) -> tuple[str, str, str]:
+    """(pass / fail / partial, evidence / self-report, why) for one persona's walk."""
+    if session.get('crashed'):
+        return 'fail', 'evidence', 'crashed before finishing'
+    said = str(session.get('verdict') or '').strip().upper()
+    signalled = f"hard signals fired: {', '.join(fired)}"
+    if session.get('success') is True:
+        if fired:
+            return 'partial', 'evidence', f'marked the goal met, but {signalled}'
+        if said.startswith('GAVE UP'):
+            return 'partial', 'evidence', 'marked the goal met, but its verdict says it gave up'
+        return 'pass', 'evidence', 'finished and marked the goal met'
+    if session.get('done') and session.get('success') is False:
+        return 'fail', 'evidence', 'finished and marked the goal not met'
+    if max_steps and not session.get('done') and session.get('steps', 0) >= max_steps:
+        return 'fail', 'evidence', f'hit max_steps ({max_steps}) without finishing'
+    if said.startswith('ACHIEVED'):
+        return ('partial', 'self-report', f'says it got there, but {signalled}') if fired else (
+            'pass', 'self-report', 'says it got there')
+    return 'fail', 'self-report', 'says it gave up' if said.startswith('GAVE UP') else 'no verdict'
+
+
+def persona_verdicts(evidence: dict) -> list[dict]:
+    fired = walk_signals(evidence)
+    max_steps = evidence['meta'].get('max_steps')
+    out = []
+    for x in evidence['sessions']:
+        journey = x.get('journey') or x.get('start_path') or '/'
+        kinds = sorted(fired[(x['target'], journey, x['device'])] | ({'server-error'} if x.get('server_errors') else set()))
+        result, basis, reason = outcome(x, kinds, max_steps)
+        out.append({'target': x['target'], 'id': x.get('id'), 'name': x['name'], 'journey': x.get('journey'),
+                    'device': x['device'], 'success_criteria': x.get('success_criteria') or '',
+                    'result': result, 'basis': basis, 'reason': reason})
+    return out
+
+
+def worked_well(evidence: dict, limit: int = 10) -> list[dict]:
+    """The preview personas' positive notes, once each."""
+    seen, out = set(), []
+    for x in evidence['sessions']:
+        if x['target'] != 'preview':
+            continue
+        for note in x.get('worked_well') or []:
+            key = ' '.join(str(note).lower().split())
+            if key and key not in seen and len(out) < limit:
+                seen.add(key)
+                out.append({'persona': x['name'], 'note': str(note)})
+    return out
+
+
+def summary(verdicts: list[dict], findings: list[dict]) -> str:
+    walked = [v for v in verdicts if v['target'] == 'preview']
+    done = sum(1 for v in walked if v['result'] == 'pass')
+    partial = sum(1 for v in walked if v['result'] == 'partial')
+    issues = f"{len(findings)} issue{'s' if len(findings) != 1 else ''}"
+    if not walked:
+        return f'No personas walked; {issues}'
+    return f"{done}/{len(walked)} personas completed" + (f' ({partial} partly)' if partial else '') + f'; {issues}'
+
+
 def judge(evidence: dict, fail_on: list[str], fail_on_unclassified: bool = False) -> dict:
     sig, improved = signal_findings(evidence)
     hard_journeys = {f['journey'] for f in sig if f['kind'] in HARD and f['classification'] != 'pre-existing'}
@@ -181,5 +256,7 @@ def judge(evidence: dict, fail_on: list[str], fail_on_unclassified: bool = False
         f['id'] = n
     gating = [f for f in findings if f['severity'] in fail_on and (
         f['classification'] == 'new' or (f['classification'] == 'unclassified' and fail_on_unclassified))]
+    verdicts = persona_verdicts(evidence)
     return {'findings': findings, 'improved': improved, 'gating': [f['id'] for f in gating],
-            'passed': not gating, 'baseline_ran': evidence.get('baseline_ran', False)}
+            'passed': not gating, 'baseline_ran': evidence.get('baseline_ran', False),
+            'personas': verdicts, 'summary': summary(verdicts, findings), 'worked_well': worked_well(evidence)}

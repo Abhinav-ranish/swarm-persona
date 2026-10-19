@@ -54,10 +54,20 @@ def render(meta: dict, verdict: dict, sessions: list[dict], checks: list[dict], 
         lines += [f"Nothing ran: {safe(meta['skipped'])}", '', footer + '</sub>']
         return '\n'.join(lines)
     walked = [s for s in sessions if s['target'] == 'preview']
+    verdicts = verdict.get('personas') or []
+    results = {v['target'] + str(v['id']): v for v in verdicts}
+    preview = [v for v in verdicts if v['target'] == 'preview']
     gate = 'Passed' if verdict['passed'] else f"**Failed** ({len(verdict['gating'])} new at {'/'.join(meta['fail_on'])})"
+    tally = ', '.join(f"{sum(1 for v in preview if v['result'] == r)} {r}" for r in ('pass', 'partial', 'fail'))
+    if verdict.get('summary'):
+        lines += [f"**{safe(verdict['summary'], 120)}**", '']
     lines += ['| Gate | Personas | Findings |', '|---|---|---|',
-              f"| {gate} | {len(walked)} walked, {sum(1 for s in walked if s.get('achieved'))} reached the goal | "
-              f"{counts(findings)} |", '']
+              f"| {gate} | {len(walked)} walked: {tally} | {counts(findings)} |", '']
+    if preview:
+        lines += ['| Persona | Journey | Verdict |', '|---|---|---|']
+        lines += [f"| {safe(v['name'], 40)} ({v['device']}) | {safe(v['journey'] or '-', 60)} | {result_text(v)} |"
+                  for v in preview]
+        lines.append('')
     if findings:
         lines += ['| # | Severity | Finding | Seen by | Status |', '|---|---|---|---|---|']
         for f in findings:
@@ -80,12 +90,18 @@ def render(meta: dict, verdict: dict, sessions: list[dict], checks: list[dict], 
             elif f['screenshots']:
                 lines += [f"Screenshots: {', '.join(Path(s).name for s in f['screenshots'][:6])}", '']
             lines += ['</details>', '']
+    if verdict.get('worked_well'):
+        lines += [f"<details><summary>Worked well ({len(verdict['worked_well'])})</summary>", '',
+                  *[f"- {safe(w['note'], 200)} ({safe(w['persona'], 40)})" for w in verdict['worked_well']],
+                  '', '</details>', '']
     if walked or sessions:
         lines += [f'<details><summary>Sessions ({len(sessions)})</summary>', '',
-                  '| Target | Persona | Device | Goal | Verdict | Steps |', '|---|---|---|---|---|---|']
+                  '| Target | Persona | Device | Goal | Result | Said | Steps |', '|---|---|---|---|---|---|---|']
         for s in sessions:
+            v = results.get(s['target'] + str(s.get('id')))
             lines.append(f"| {s['target']} | {safe(s['name'], 40)}: {safe(s['who'], 160)} | {s['device']} | "
-                         f"{safe(s['goal'], 200)} | {safe(s['verdict'], 300)} | {s['steps']} |")
+                         f"{safe(s['goal'], 200)} | {result_text(v) if v else '-'} | {safe(s['verdict'], 300)} | "
+                         f"{s['steps']} |")
         lines += ['', '</details>', '']
     if checks:
         lines += [f'<details><summary>Entry checks ({len(checks)})</summary>', '',
@@ -112,6 +128,11 @@ def render(meta: dict, verdict: dict, sessions: list[dict], checks: list[dict], 
                            else ' · no baseline, so findings are unclassified') + '</sub>')
     text = '\n'.join(lines)
     return re.sub(rf'\s*{EM_DASH}\s*', ', ', text) if no_em_dashes else text
+
+
+def result_text(v: dict) -> str:
+    label = '**' + v['result'] + '**' + (' (self-report)' if v['basis'] == 'self-report' else '')
+    return f"{label}: {safe(v['reason'], 120)}"
 
 
 def guard_lines(sessions: list[dict], app_hosts: list[str]) -> list[str]:

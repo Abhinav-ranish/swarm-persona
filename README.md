@@ -114,6 +114,24 @@ personas:
     - {name: Tom, background: A new account manager., tech_comfort: low}
 ```
 
+## Per-persona verdicts
+
+Every persona gets **pass**, **fail** or **partial** against its journey's `success_criteria`,
+decided from the evidence, in this order:
+
+| Evidence | Verdict |
+|---|---|
+| The persona crashed | fail |
+| It finished and marked the goal met (browser-use's done action, `success: true`) | pass; partial if a hard signal fired on its journey and device, or its own verdict says it gave up |
+| It finished and marked the goal not met | fail |
+| It ran out of `max_steps` without finishing | fail |
+| None of the above | its own ACHIEVED / GAVE UP verdict, labelled **self-report** (partial when a hard signal fired) |
+
+The report opens with a one-line summary ("3/4 personas completed; 2 issues"), shows each preview
+persona's verdict and why, and folds a **Worked well** list: personas return up to three things
+that went smoothly in their structured final answer. All of it is rebuilt from `evidence.json`, so
+`replay` shows it too.
+
 ## Output
 
 `--out` holds `report.md` (also the PR comment), `report.json` (findings, gate, metadata),

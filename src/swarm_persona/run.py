@@ -117,7 +117,8 @@ async def walk(cfg: Config, ctx: dict, personas: list[dict], label: str, origin:
             error = task.exception()
             print(f"  [{label}] {persona['name']} failed: {type(error).__name__}: {error}", flush=True)
             results.append({**persona, 'target': label, 'verdict': f'CRASHED: {type(error).__name__}: {str(error)[:200]}',
-                            'achieved': False, 'crashed': True, 'steps': 0, 'tokens': 0, 'seconds': 0,
+                            'achieved': False, 'crashed': True, 'done': False, 'success': None,
+                            'worked_well': [], 'steps': 0, 'tokens': 0, 'seconds': 0,
                             'issues': [], 'guard_blocked': [], 'server_errors': []})
         elif task.result():
             results.append(task.result())
@@ -141,7 +142,7 @@ async def run(cfg: Config, *, out: Path, pr: str | None = None, pr_context_file:
             'app_hosts': sorted(cfg.app_hosts(preview_url)),
             'model': f'{cfg.llm.provider}:{cfg.llm.model}', 'version': __version__,
             'run_id': time.strftime('%Y%m%d-%H%M%S') + '-' + os.urandom(3).hex(),
-            'images_repo': cfg.report.images_repo,
+            'images_repo': cfg.report.images_repo, 'max_steps': cfg.personas.max_steps,
             'fail_on': cfg.report.fail_on, 'fail_on_unclassified': cfg.report.fail_on_unclassified,
             'no_em_dashes': cfg.report.no_em_dashes, 'notes': []}
     notes, spent = meta['notes'], {'tokens': 0}
