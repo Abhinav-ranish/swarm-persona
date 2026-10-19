@@ -108,6 +108,13 @@ def cmd_guard_test(args) -> int:
         shutil.rmtree(work, ignore_errors=True)
 
 
+def cmd_mcp(args) -> int:
+    from .mcp_server import serve
+
+    serve()
+    return 0
+
+
 def cmd_init(args) -> int:
     target = Path(args.path)
     if target.exists():
@@ -174,6 +181,9 @@ def main(argv: list[str] | None = None) -> None:
     g.add_argument('--config', required=True)
     g.add_argument('--url')
     g.set_defaults(func=cmd_guard_test)
+
+    m = sub.add_parser('mcp', help='serve the test, status, findings, list_runs and close tools over stdio (MCP)')
+    m.set_defaults(func=cmd_mcp)
 
     i = sub.add_parser('init', help='write an example swarm-persona.yml')
     i.add_argument('path', nargs='?', default='swarm-persona.yml')

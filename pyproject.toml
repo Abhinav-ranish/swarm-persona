@@ -23,6 +23,7 @@ dependencies = [
 
 [project.optional-dependencies]
 bedrock = ["boto3>=1.35"]
+mcp = ["mcp>=1.10"]
 dev = ["pytest>=8"]
 
 [project.scripts]

@@ -184,6 +184,30 @@ Each issue carries a hidden marker with a hash of the fingerprint; when an open 
 already has it, nothing is filed, so running `tickets` after every run adds only what is new. Issue
 text is defanged like the comment.
 
+## MCP server
+
+`swarm-persona mcp` serves the swarm to an MCP client (Claude Code, Cursor, any stdio client). It
+needs the `mcp` extra:
+
+```bash
+uv tool install "swarm-persona[bedrock,mcp] @ git+https://github.com/Abhinav-ranish/swarm-persona"
+claude mcp add swarm-persona -- swarm-persona mcp
+```
+
+| Tool | What it does |
+|---|---|
+| `test(config_path, goal?, audience?, journeys?)` | starts `swarm-persona run` in the background and returns a `run_id`. `journeys` keeps only the named journeys; `goal` adds an ad-hoc journey (it replaces the configured ones unless `journeys` names some to keep) and must pass the forbidden-words filter; `audience` sets `personas.audience` |
+| `status(run_id)` | state (`running`, `closing`, `passed`, `gate-failed`, `error`, `closed`), elapsed seconds, personas planned and done per target, the last log lines |
+| `findings(run_id)` | the run's `report.json`: gate, summary, per-persona verdicts, worked-well notes, findings |
+| `list_runs()` | known runs, newest first |
+| `close(run_id)` | SIGTERM, which the CLI unwinds: proxies stop and the sign-out command runs |
+
+Each run lives in `~/.swarm-persona/runs/<run_id>/` (`SWARM_PERSONA_HOME` moves it): the config
+it ran with, `run.log`, and `out/` with the usual report and evidence. The server only wraps the
+CLI, so the guard self-test, preflight and budgets apply exactly as on the command line. Relative
+paths in the config (an auth helper script) resolve against the directory the server was started
+in, which for Claude Code is the project.
+
 ## The write guard
 
 Each persona's browser, and the checker's, talks only to its own `mitmdump` running

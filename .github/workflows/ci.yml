@@ -18,6 +18,6 @@ jobs:
       - name: Install mitmproxy (for the live guard tests)
         run: uv tool install -q --python 3.12 mitmproxy==11.1.3
       - name: Tests
-        run: uv run --python 3.12 --extra dev pytest -q
+        run: uv run --python 3.12 --extra dev --extra bedrock --extra mcp pytest -q
       - name: Shell scripts parse
         run: bash -n deploy/aws/setup.sh && bash -n deploy/aws/run.sh
