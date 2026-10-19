@@ -6,3 +6,10 @@ dist/
 out/
 *.egg-info/
 uv.lock
+.env
+.env.*
+!.env.example
+*.p8
+*.pem
+*.key
+.dev.vars

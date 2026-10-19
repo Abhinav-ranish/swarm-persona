@@ -6,7 +6,7 @@
 #   deploy/aws/test.sh [pytest args, e.g. tests/test_judge.py -k verdict]
 #
 # Exits with pytest's result. Settings: SP_REGION, SP_PROJECT and SP_BUCKET as for setup.sh, and
-# SP_EXPECT_ACCOUNT.
+# SP_EXPECT_ACCOUNT (optional; the account in use is printed before anything uploads).
 set -euo pipefail
 REGION=${SP_REGION:-us-east-2}
 PROJECT=${SP_PROJECT:-swarm-persona}
@@ -20,10 +20,12 @@ if [ -n "${SP_EXPECT_ACCOUNT:-}" ] && [ "$ACCOUNT" != "$SP_EXPECT_ACCOUNT" ]; th
   echo "Wrong AWS account: $ACCOUNT, expected $SP_EXPECT_ACCOUNT (aws sso login?)" >&2; exit 1
 fi
 BUCKET=${SP_BUCKET:-$PROJECT-$ACCOUNT}
+echo "AWS account $ACCOUNT, region $REGION, bucket $BUCKET, project $PROJECT"
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/swarm-persona-test.XXXXXX")
 trap 'rm -rf "$WORK"' EXIT
-(cd "$ROOT" && git ls-files -z --cached --others --exclude-standard | xargs -0 zip -q "$WORK/source.zip")
+# -y stores symlinks as links, so a link to a file outside the tree never uploads its target.
+(cd "$ROOT" && git ls-files -z --cached --others --exclude-standard | xargs -0 zip -q -y "$WORK/source.zip")
 KEY="source/tests-$(date +%Y%m%d%H%M%S).zip"
 aws s3 cp --quiet "$WORK/source.zip" "s3://$BUCKET/$KEY" --region "$REGION"
 
