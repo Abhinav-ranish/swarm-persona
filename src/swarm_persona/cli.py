@@ -66,8 +66,8 @@ def cmd_tickets(args) -> int:
         app = args.github_app or os.environ.get('SWARM_PERSONA_GITHUB_APP')
         client = (Client.from_app(json.loads(Path(app).read_text()), repo, {'issues': 'write'}) if app
                   else Client.from_cli())
-        for r in file_issues(client, repo, tickets, args.label, __version__):
-            print(f"{'created' if r['created'] else 'exists '} {r['url']}")
+        for r in file_issues(client, repo, tickets, args.label, __version__, args.reopen_closed, args.max_issues):
+            print(f"{r['action']:9} {r['url'] or r['id']}")
     return 0
 
 
@@ -164,6 +164,8 @@ def main(argv: list[str] | None = None) -> None:
     t.add_argument('--repo', help='owner/name for the issues (default: this checkout or $GITHUB_REPOSITORY)')
     t.add_argument('--label', action='append', default=[], help='label for new issues; repeat for more')
     t.add_argument('--github-app', help='JSON file {app_id, installation_id, private_key}: file as the app')
+    t.add_argument('--reopen-closed', action='store_true', help='reopen a closed issue of ours that a finding matches')
+    t.add_argument('--max-issues', type=int, default=10, help='create or reopen at most this many issues (default 10)')
     t.set_defaults(func=cmd_tickets)
 
     s = sub.add_parser('select', help='which journeys a change selects (globs only, no model)')

@@ -184,11 +184,18 @@ swarm-persona tickets out/ --github-issues --repo acme/notes --label ux --label 
 
 `tickets.json` holds one ticket per finding fingerprint: title, severity, classification, steps to
 reproduce, personas, screenshot names, the possible fix if any, and the fingerprint
-(`--min-severity`, default minor). `--github-issues` opens a GitHub Issue for each ticket through
-the same client as the PR comment (`gh` token, `GH_TOKEN`, or `--github-app` with Issues write).
-Each issue carries a hidden marker with a hash of the fingerprint; when an open issue you opened
-already has it, nothing is filed, so running `tickets` after every run adds only what is new. Issue
-text is defanged like the comment.
+(`--min-severity`, default minor). Findings are rebuilt from `evidence.json` the way `replay` does,
+so a run from an older version works too. `--github-issues` opens a GitHub Issue for each ticket
+through the same client as the PR comment (`gh` token, `GH_TOKEN`, or `--github-app` with Issues
+write). Each issue carries a hidden marker with a hash of the fingerprint, and the issues you opened
+(open and closed) are checked for it first:
+
+- an open issue with the marker: nothing is filed;
+- a closed one: nothing is filed, since somebody closed it on purpose, unless `--reopen-closed`;
+- none: a new issue, with the `--label`s.
+
+At most `--max-issues` (default 10) are created or reopened per call. Issue text is defanged like
+the comment.
 
 ## MCP server
 

@@ -11,21 +11,25 @@ FIXTURE = Path(__file__).parent / 'fixtures' / 'run' / 'evidence.json'
 
 
 class Fake(github.Client):
-    """Answers like the GitHub issues API: open issues are listed back, created ones are kept."""
+    """Answers like the GitHub issues API: issues are listed back, created ones kept, PATCH reopens."""
 
     def __init__(self, issues=(), login='me'):
         super().__init__('t', login)
-        self.issues, self.calls = list(issues), []
+        self.issues, self.calls = [{'state': 'open', 'number': n + 1, **i} for n, i in enumerate(issues)], []
 
     def api(self, method, path, body=None):
         self.calls.append((method, path, body))
-        if method == 'GET' and path.startswith('/repos/o/r/issues?state=open&creator=me&per_page=100&page='):
+        if method == 'GET' and path.startswith('/repos/o/r/issues?state=all&creator=me&per_page=100&page='):
             page = int(path.rsplit('=', 1)[1])
             return self.issues[(page - 1) * 100:page * 100]
         if method == 'POST' and path == '/repos/o/r/issues':
             url = f'https://github.com/o/r/issues/{len(self.issues) + 1}'
-            self.issues.append({'body': body['body'], 'user': {'login': 'me'}, 'html_url': url})
+            self.issues.append({'body': body['body'], 'user': {'login': 'me'}, 'html_url': url, 'state': 'open',
+                                'number': len(self.issues) + 1})
             return {'html_url': url}
+        if method == 'PATCH' and path.startswith('/repos/o/r/issues/'):
+            self.issues[int(path.rsplit('/', 1)[1]) - 1]['state'] = body['state']
+            return {}
         raise AssertionError(path)
 
 
@@ -61,20 +65,47 @@ def test_the_cli_writes_tickets_json_and_files_nothing_unless_asked(run_dir, mon
     assert len(json.loads((run_dir / 'tickets.json').read_text())) == 5
 
 
-def test_issues_are_deduped_by_the_fingerprint_marker_on_our_open_issues(run_dir):
+def actions(results):
+    return [r['action'] for r in results]
+
+
+def test_issues_are_deduped_by_the_fingerprint_marker_on_our_issues(run_dir):
     tickets = build(run_dir)
     first = tickets[0]
     fake = Fake(issues=[
-        {'body': 'old ' + MARKER.format(first['id']), 'user': {'login': 'me'}, 'html_url': 'https://github.com/o/r/issues/9'},
+        {'body': 'old ' + MARKER.format(first['id']), 'user': {'login': 'me'}, 'html_url': 'https://github.com/o/r/issues/1'},
         {'body': MARKER.format(tickets[1]['id']), 'user': {'login': 'mallory'}, 'html_url': 'x'},  # not ours
         {'body': MARKER.format(tickets[2]['id']), 'user': {'login': 'me'}, 'html_url': 'y', 'pull_request': {}},
     ])
     results = file_issues(fake, 'o/r', tickets, ['ux'])
-    assert results[0] == {'id': first['id'], 'url': 'https://github.com/o/r/issues/9', 'created': False}
-    assert [r['created'] for r in results] == [False, True, True, True, True]
+    assert results[0] == {'id': first['id'], 'url': 'https://github.com/o/r/issues/1', 'action': 'exists'}
+    assert actions(results) == ['exists', 'created', 'created', 'created', 'created']
     assert all(b['labels'] == ['ux'] for b in created(fake))
-    again = file_issues(fake, 'o/r', tickets, [])
-    assert not any(r['created'] for r in again) and len(created(fake)) == 4
+    assert actions(file_issues(fake, 'o/r', tickets, [])) == ['exists'] * 5 and len(created(fake)) == 4
+
+
+def test_a_closed_issue_is_not_filed_again_unless_reopen_closed(run_dir):
+    tickets = build(run_dir)[:2]
+    fake = Fake(issues=[{'body': MARKER.format(tickets[0]['id']), 'user': {'login': 'me'}, 'html_url': 'c',
+                         'state': 'closed'}])
+    assert actions(file_issues(fake, 'o/r', tickets, [])) == ['closed', 'created']
+    assert actions(file_issues(fake, 'o/r', tickets, [], reopen_closed=True)) == ['reopened', 'exists']
+    assert ('PATCH', '/repos/o/r/issues/1', {'state': 'open'}) in fake.calls and fake.issues[0]['state'] == 'open'
+
+
+def test_an_open_duplicate_wins_over_a_closed_one(run_dir):
+    [t] = build(run_dir)[:1]
+    mark = {'body': MARKER.format(t['id']), 'user': {'login': 'me'}}
+    fake = Fake(issues=[{**mark, 'html_url': 'open', 'state': 'open'}, {**mark, 'html_url': 'shut', 'state': 'closed'}])
+    assert file_issues(fake, 'o/r', [t], [])[0] == {'id': t['id'], 'url': 'open', 'action': 'exists'}
+
+
+def test_max_issues_caps_creations_and_reopens(run_dir):
+    tickets = build(run_dir)
+    fake = Fake()
+    assert actions(file_issues(fake, 'o/r', tickets, [], max_issues=2)) == ['created', 'created'] + ['skipped'] * 3
+    assert len(created(fake)) == 2
+    assert actions(file_issues(fake, 'o/r', tickets, [])) == ['exists', 'exists', 'created', 'created', 'created']
 
 
 def test_the_same_fingerprint_twice_in_one_batch_files_once(run_dir):
@@ -88,7 +119,15 @@ def test_listing_follows_pages(run_dir):
     tickets = build(run_dir)
     filler = [{'body': '', 'user': {'login': 'me'}, 'html_url': 'f'}] * 100
     fake = Fake(issues=filler + [{'body': MARKER.format(tickets[0]['id']), 'user': {'login': 'me'}, 'html_url': 'p2'}])
-    assert file_issues(fake, 'o/r', tickets[:1], [])[0] == {'id': tickets[0]['id'], 'url': 'p2', 'created': False}
+    assert file_issues(fake, 'o/r', tickets[:1], [])[0] == {'id': tickets[0]['id'], 'url': 'p2', 'action': 'exists'}
+
+
+def test_tickets_ignore_an_old_report_json_and_rebuild_from_evidence(run_dir):
+    (run_dir / 'report.json').write_text(json.dumps({'findings': [{'title': 'v0.1.x finding, no fingerprint',
+                                                                  'severity': 'blocker'}], 'gating': []}))
+    tickets = build(run_dir)
+    assert len(tickets) == 5 and all(t['fingerprint'] for t in tickets)
+    assert 'v0.1.x' not in json.dumps(tickets)
 
 
 def test_issue_text_is_defanged():

@@ -1,8 +1,9 @@
 """Tickets from a finished run: tickets.json, and on request GitHub Issues, one per fingerprint.
 
 Opt-in only: `run` never files anything. An issue carries a hidden marker with a hash of the
-finding's fingerprint, and an open issue of ours with that marker means the ticket already exists,
-so filing again after every run adds only what is new. Text that reaches GitHub is defanged by
+finding's fingerprint. An open issue of ours with that marker means the ticket already exists, and
+a closed one means somebody closed it, so it is not filed again unless asked; filing after every
+run adds only what is new. Text that reaches GitHub is defanged by
 report.safe, like the PR comment.
 """
 
@@ -14,7 +15,7 @@ import re
 from pathlib import Path
 from urllib.parse import quote
 
-from .judge import rank
+from .judge import judge, rank
 from .report import safe
 
 MARKER = '<!-- swarm-persona-ticket:{} -->'
@@ -38,29 +39,27 @@ def steps(finding: dict, goals: dict[str, str]) -> list[str]:
 
 
 def build(out: Path, min_severity: str = 'polish') -> list[dict]:
-    """One ticket per fingerprint, from report.json (rebuilt from evidence.json when missing)."""
-    if not (out / 'report.json').exists():
-        from .run import replay
-
-        replay(out)
-    report = json.loads((out / 'report.json').read_text())
+    """One ticket per fingerprint, from findings rebuilt out of evidence.json the way replay does
+    (report.json may come from an older version without fingerprints)."""
     evidence = json.loads((out / 'evidence.json').read_text())
+    meta = evidence.get('meta', {})
+    findings = judge(evidence, meta.get('fail_on') or ['blocker'])['findings']
     goals = {s['journey']: s['goal'] for s in evidence.get('sessions', []) if s.get('journey')}
     tickets: dict[str, dict] = {}
-    for f in report['findings']:
+    for f in findings:
         if rank(f['severity']) > rank(min_severity):
             continue
         if f['fingerprint'] in tickets:
             t = tickets[f['fingerprint']]
             t['personas'] = sorted(set(t['personas']) | set(f['personas']))
-            t['screenshots'] += [s for s in f['screenshots'] if s not in t['screenshots']]
+            t['screenshots'] += [Path(s).name for s in f['screenshots'] if Path(s).name not in t['screenshots']]
             continue
         tickets[f['fingerprint']] = {
             'id': ticket_id(f['fingerprint']), 'fingerprint': f['fingerprint'], 'title': f['title'],
             'severity': f['severity'], 'classification': f['classification'], 'journey': f.get('journey'),
             'devices': f['devices'], 'detail': f['detail'], 'steps': steps(f, goals),
             'personas': f['personas'], 'screenshots': [Path(s).name for s in f['screenshots']],
-            'possible_fix': f.get('possible_fix'), 'run_id': report.get('meta', {}).get('run_id'),
+            'possible_fix': f.get('possible_fix'), 'run_id': meta.get('run_id'),
         }
     return list(tickets.values())
 
@@ -89,33 +88,49 @@ def issue_body(t: dict, version: str | None = None) -> str:
     return '\n'.join(lines)
 
 
-def open_ticket_ids(client, repo: str) -> dict[str, str]:
-    """{ticket id: issue URL} for open issues we opened that carry a ticket marker."""
+def known_tickets(client, repo: str) -> dict[str, dict]:
+    """{ticket id: {url, number, state}} for every issue we opened, open or closed, carrying a marker.
+    An open issue wins over a closed one with the same marker."""
     login, found, page = client.login(), {}, 1
     while True:
-        issues = client.api('GET', f'/repos/{repo}/issues?state=open&creator={quote(login)}&per_page=100&page={page}')
+        issues = client.api('GET', f'/repos/{repo}/issues?state=all&creator={quote(login)}&per_page=100&page={page}')
         for issue in issues:
             if 'pull_request' in issue or (issue.get('user') or {}).get('login') != login:
                 continue
             for tid in MARKER_RE.findall(issue.get('body') or ''):
-                found.setdefault(tid, issue['html_url'])
+                if tid not in found or issue.get('state') == 'open':
+                    found[tid] = {'url': issue['html_url'], 'number': issue.get('number'), 'state': issue.get('state')}
         if len(issues) < 100:
             return found
         page += 1
 
 
-def file_issues(client, repo: str, tickets: list[dict], labels: list[str], version: str | None = None) -> list[dict]:
-    """Create an issue per ticket that has no open issue yet. Returns what happened to each."""
-    existing = open_ticket_ids(client, repo)
-    results = []
+def file_issues(client, repo: str, tickets: list[dict], labels: list[str], version: str | None = None,
+                reopen_closed: bool = False, max_issues: int = 10) -> list[dict]:
+    """Open an issue per ticket that has none yet; a ticket whose issue was closed stays closed unless
+    reopen_closed. At most max_issues are created or reopened. Returns what happened to each:
+    created, reopened, exists, closed, or skipped (over max_issues)."""
+    known = known_tickets(client, repo)
+    results, budget = [], max_issues
     for t in tickets:
-        if t['id'] in existing:
-            results.append({'id': t['id'], 'url': existing[t['id']], 'created': False})
-            continue
-        body = {'title': safe(t['title'], 120) or 'swarm-persona finding', 'body': issue_body(t, version)}
-        if labels:
-            body['labels'] = labels
-        url = client.api('POST', f'/repos/{repo}/issues', body)['html_url']
-        existing[t['id']] = url
-        results.append({'id': t['id'], 'url': url, 'created': True})
+        have = known.get(t['id'])
+        if have and have['state'] == 'open':
+            results.append({'id': t['id'], 'url': have['url'], 'action': 'exists'})
+        elif have and not reopen_closed:
+            results.append({'id': t['id'], 'url': have['url'], 'action': 'closed'})
+        elif budget <= 0:
+            results.append({'id': t['id'], 'url': None, 'action': 'skipped'})
+        elif have:
+            budget -= 1
+            client.api('PATCH', f"/repos/{repo}/issues/{have['number']}", {'state': 'open'})
+            known[t['id']] = {**have, 'state': 'open'}
+            results.append({'id': t['id'], 'url': have['url'], 'action': 'reopened'})
+        else:
+            budget -= 1
+            body = {'title': safe(t['title'], 120) or 'swarm-persona finding', 'body': issue_body(t, version)}
+            if labels:
+                body['labels'] = labels
+            url = client.api('POST', f'/repos/{repo}/issues', body)['html_url']
+            known[t['id']] = {'url': url, 'number': None, 'state': 'open'}
+            results.append({'id': t['id'], 'url': url, 'action': 'created'})
     return results
