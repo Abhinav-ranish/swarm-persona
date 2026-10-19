@@ -166,6 +166,24 @@ swarm-persona; anyone can paste the marker), and edited in place on every run. T
 models is defanged before it lands there: no @mentions, issue cross-references, links, autolinks,
 images or HTML. Issue URLs are recorded without query strings.
 
+## Tickets
+
+`swarm-persona tickets OUT` turns a finished run into tickets. It is opt-in: `run` never files
+anything.
+
+```bash
+swarm-persona tickets out/                                    # out/tickets.json
+swarm-persona tickets out/ --github-issues --repo acme/notes --label ux --label swarm-persona
+```
+
+`tickets.json` holds one ticket per finding fingerprint: title, severity, classification, steps to
+reproduce, personas, screenshot names, the possible fix if any, and the fingerprint
+(`--min-severity`, default minor). `--github-issues` opens a GitHub Issue for each ticket through
+the same client as the PR comment (`gh` token, `GH_TOKEN`, or `--github-app` with Issues write).
+Each issue carries a hidden marker with a hash of the fingerprint; when an open issue you opened
+already has it, nothing is filed, so running `tickets` after every run adds only what is new. Issue
+text is defanged like the comment.
+
 ## The write guard
 
 Each persona's browser, and the checker's, talks only to its own `mitmdump` running

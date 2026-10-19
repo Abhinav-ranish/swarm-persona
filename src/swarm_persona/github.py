@@ -40,7 +40,7 @@ class Client:
         return cls(token)
 
     @classmethod
-    def from_app(cls, app: dict, repo: str) -> 'Client':
+    def from_app(cls, app: dict, repo: str, permissions: dict | None = None) -> 'Client':
         """An installation token for one repository, minted from {app_id, installation_id, private_key}.
         Signed with the openssl CLI so the package needs no crypto dependency."""
         now = int(time.time())
@@ -57,7 +57,8 @@ class Client:
         jwt = Client(f'{unsigned}.{b64url(signature)}')
         slug = jwt.api('GET', '/app')['slug']
         minted = jwt.api('POST', f"/app/installations/{app['installation_id']}/access_tokens",
-                         {'repositories': [repo.split('/', 1)[1]], 'permissions': {'pull_requests': 'write'}})
+                         {'repositories': [repo.split('/', 1)[1]],
+                          'permissions': permissions or {'pull_requests': 'write'}})
         return cls(minted['token'], f'{slug}[bot]')
 
     def api(self, method: str, path: str, body: dict | None = None):

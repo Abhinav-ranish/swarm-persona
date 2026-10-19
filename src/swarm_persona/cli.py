@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import shutil
 import signal
 import sys
@@ -47,6 +48,26 @@ def cmd_publish(args) -> int:
 
     print(publish(Path(args.out), args.pr, args.repo, args.images_repo,
                   args.github_app or os.environ.get('SWARM_PERSONA_GITHUB_APP')))
+    return 0
+
+
+def cmd_tickets(args) -> int:
+    from .tickets import build, file_issues, write_json
+
+    out = Path(args.out)
+    tickets = build(out, args.min_severity)
+    print(f'Wrote {write_json(out, tickets)} ({len(tickets)} tickets).')
+    if args.github_issues:
+        from .github import Client, repo_name
+
+        repo = args.repo or repo_name()
+        if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo):
+            sys.exit(f'--repo must be owner/name, got {repo!r}')
+        app = args.github_app or os.environ.get('SWARM_PERSONA_GITHUB_APP')
+        client = (Client.from_app(json.loads(Path(app).read_text()), repo, {'issues': 'write'}) if app
+                  else Client.from_cli())
+        for r in file_issues(client, repo, tickets, args.label, __version__):
+            print(f"{'created' if r['created'] else 'exists '} {r['url']}")
     return 0
 
 
@@ -127,6 +148,16 @@ def main(argv: list[str] | None = None) -> None:
     pb.add_argument('--images-repo', help='owner/name to commit screenshots to (default: report.images_repo)')
     pb.add_argument('--github-app', help='JSON file {app_id, installation_id, private_key}: comment as the app')
     pb.set_defaults(func=cmd_publish)
+
+    t = sub.add_parser('tickets', help='write OUT/tickets.json from a finished run; optionally file GitHub Issues')
+    t.add_argument('out')
+    t.add_argument('--format', choices=['json'], default='json')
+    t.add_argument('--min-severity', choices=['blocker', 'major', 'minor', 'polish'], default='minor')
+    t.add_argument('--github-issues', action='store_true', help='open an issue per ticket that has no open one yet')
+    t.add_argument('--repo', help='owner/name for the issues (default: this checkout or $GITHUB_REPOSITORY)')
+    t.add_argument('--label', action='append', default=[], help='label for new issues; repeat for more')
+    t.add_argument('--github-app', help='JSON file {app_id, installation_id, private_key}: file as the app')
+    t.set_defaults(func=cmd_tickets)
 
     s = sub.add_parser('select', help='which journeys a change selects (globs only, no model)')
     s.add_argument('--config', required=True)
