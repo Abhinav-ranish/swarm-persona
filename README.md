@@ -59,7 +59,7 @@ Everything about your app lives in `swarm-persona.yml`. The annotated
 | `preflight` | GETs that must pass before any browser starts (for example "the test workspace has no connected social account") |
 | `journeys` | `name`, `goal`, `start_path`, `success_criteria`, `owns` globs, `critical_selectors`, `devices` |
 | `shared` | globs whose change selects every journey (root layout, middleware, global CSS, lockfile) |
-| `personas`, `llm`, `budget`, `report` | count and steps; provider and model; persona, step, token and time caps; `fail_on` severities |
+| `personas`, `llm`, `budget`, `report` | count, steps, `audience` and `saved` personas; provider and model; persona, step, token and time caps; `fail_on` severities and `suggest_fixes` |
 
 ## How a run decides
 

@@ -74,8 +74,8 @@ def write_json(out: Path, tickets: list[dict]) -> Path:
 def issue_body(t: dict, version: str | None = None) -> str:
     fix = t.get('possible_fix')
     lines = [MARKER.format(t['id']),
-             f"**{t['severity']}**, {t['classification']}, journey {safe(t['journey'] or '-', 60)}, "
-             f"{'/'.join(t['devices']) or 'any device'}", '', safe(t['detail'], 1500), '',
+             (f"**{t['severity']}**, {t['classification']}, journey {safe(t['journey'] or '-', 60)}, "
+              f"{'/'.join(t['devices']) or 'any device'}"), '', safe(t['detail'], 1500), '',
              '**Steps to reproduce**', *[f'{n}. {safe(s, 400)}' for n, s in enumerate(t['steps'], 1)], '']
     if t['personas']:
         lines += [f"Seen by: {', '.join(safe(p, 40) for p in t['personas'])}.", '']

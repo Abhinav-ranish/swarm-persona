@@ -26,7 +26,7 @@ def pr_diff(pr: str | None, context_file: str | None) -> str:
     if not pr:
         return ''
     try:
-        done = subprocess.run(['gh', 'pr', 'diff', pr], capture_output=True, text=True, timeout=120)
+        done = subprocess.run(['gh', 'pr', 'diff', pr], capture_output=True, text=True, timeout=120, check=False)
     except (OSError, subprocess.TimeoutExpired):
         return ''
     return done.stdout if done.returncode == 0 else ''

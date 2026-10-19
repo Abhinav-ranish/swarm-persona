@@ -69,7 +69,7 @@ def alive(pid: int) -> bool:
         return False
     except PermissionError:
         pass
-    ps = subprocess.run(['ps', '-p', str(pid), '-o', 'command='], capture_output=True, text=True)
+    ps = subprocess.run(['ps', '-p', str(pid), '-o', 'command='], capture_output=True, text=True, check=False)
     return 'swarm_persona.cli' in ps.stdout
 
 
@@ -94,9 +94,9 @@ def state_of(path: Path, meta: dict) -> str:
 def progress(path: Path) -> dict:
     """Personas planned and walks finished per target, read from the run's log."""
     log = (path / 'run.log').read_text(errors='replace') if (path / 'run.log').exists() else ''
-    planned = re.search(r'^Personas: (.*)$', log, re.M)
+    planned = re.search(r'^Personas: (.*)$', log, re.MULTILINE)
     done: dict[str, int] = {}
-    for target in re.findall(r'^\s+\[(\w+)\] (?:done |\S.* failed: )', log, re.M):
+    for target in re.findall(r'^\s+\[(\w+)\] (?:done |\S.* failed: )', log, re.MULTILINE):
         done[target] = done.get(target, 0) + 1
     return {'personas_planned': len(planned.group(1).split('; ')) if planned else None, 'personas_done': done,
             'log_tail': log.strip().splitlines()[-5:]}
