@@ -335,7 +335,7 @@ more; close the older duplicates by hand. Signal and journey tickets are unaffec
 
 ## Credits
 
-The persona swarm and the network guard grew out of ContentOS's internal UX swarm. The baseline
+The persona swarm and the network guard grew out of an internal UX swarm. The baseline
 oracle, diff-aware journey selection, rule-first severity, trial-click overlay checks, sticky
 comment and offline replay come from [ux-guardian](https://github.com/aranish-uk/ux-guardian), a
 hackathon prototype built on TinyFish. Personas run on [browser-use](https://github.com/browser-use/browser-use).
