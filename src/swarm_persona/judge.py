@@ -138,7 +138,11 @@ def finding_key(finding: dict) -> str:
 def agent_findings(evidence: dict, hard_journeys: set[str]) -> list[dict]:
     raw = [i for i in evidence['raw_issues'] if i['target'] == 'preview']
     base_keys = {issue_key(i) for i in evidence['raw_issues'] if i['target'] == 'baseline'}
-    baseline_ran = evidence.get('baseline_ran', False)
+    # The baseline's entry checks may have run while every one of its personas crashed or was cut off:
+    # then no persona walked it, and an agent report cannot be called new or pre-existing.
+    walkers = [x for x in evidence['sessions'] if x['target'] == 'baseline']
+    baseline_ran = evidence.get('baseline_ran', False) and not (
+        walkers and all(x.get('crashed') or x.get('timed_out') for x in walkers))
     merge = evidence.get('merge')
     groups = ([{**m, 'source_ids': [i for i in m.get('source_ids', []) if 0 <= i < len(raw)]} for m in merge['issues']]
               if merge else [{**i, 'source_ids': [n]} for n, i in enumerate(raw)])

@@ -151,12 +151,6 @@ async def walk(cfg: Config, ctx: dict, personas: list[dict], label: str, origin:
     return results
 
 
-def baseline_ran(sessions: list[dict]) -> bool:
-    """A baseline whose personas all crashed or were cut off walked nothing, so it cannot classify a
-    preview finding as new or pre-existing."""
-    return any(s['target'] == 'baseline' and not s.get('crashed') and not s.get('timed_out') for s in sessions)
-
-
 async def run(cfg: Config, *, out: Path, pr: str | None = None, pr_context_file: str | None = None,
               url: str | None = None, baseline: bool = True, model_selection: bool = True,
               headed: bool = False) -> dict:
@@ -225,7 +219,7 @@ async def run(cfg: Config, *, out: Path, pr: str | None = None, pr_context_file:
     spent['tokens'] += tokens
     if merged is None:
         notes.append('The merge pass reply was unusable, so every raw report is listed unmerged.')
-    evidence = {'meta': meta, 'baseline_ran': baseline_ran(sessions),
+    evidence = {'meta': meta, 'baseline_ran': any(s['target'] == 'baseline' for s in sessions),
                 'ctx': {'title': ctx['title'], 'files': ctx['files']}, 'personas': personas,
                 'checks': checks, 'sessions': [{k: v for k, v in s.items() if k != 'issues'} for s in sessions],
                 'raw_issues': raw, 'merge': merged}

@@ -101,7 +101,7 @@
   {
     "id": "walk-must-report-timeouts",
     "kind": "gotcha",
-    "text": "walk() also dropped personas still pending at budget.timeout_minutes (v0.2.0), so a run where half the swarm timed out reported 2/2 completed. A cut-off task must stay a session row with timed_out, and the judge keeps timed-out sessions out of the journey rule on both sides, like crashes: the timeout is one clock for the whole target and some personas never start. A baseline whose personas all crashed or timed out did not run (run.baseline_ran), or every preview finding is classified new.",
+    "text": "walk() also dropped personas still pending at budget.timeout_minutes (v0.2.0), so a run where half the swarm timed out reported 2/2 completed. A cut-off task must stay a session row with timed_out, and the judge keeps timed-out sessions out of the journey rule on both sides, like crashes: the timeout is one clock for the whole target and some personas never start. When every baseline persona crashed or timed out, agent_findings must not classify against the baseline (its findings would all be new), but baseline_ran stays true for the entry-check signals, which did run there.",
     "paths": ["src/swarm_persona/run.py", "src/swarm_persona/judge.py"],
     "created": "2026-10-19",
     "source": "fix/timed-out-personas"

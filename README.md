@@ -331,9 +331,9 @@ sign-out command runs.
 with "cut off at the N-minute timeout", instead of being left out. The summary counts every
 planned persona, for example "2/4 personas completed; 2 timed out; 3 issues". A cut-off persona
 counts on neither side of the "personas could not finish" journey rule, like a crash: the timeout
-is one clock for every persona on a target, so it says nothing about the journey. A baseline
-whose personas all crashed or were cut off no longer counts as having run, so it cannot mark
-preview findings new. Evidence from 0.2.0 replays unchanged.
+is one clock for every persona on a target, so it says nothing about the journey. When every
+baseline persona crashed or was cut off, the personas' findings on the preview are unclassified
+rather than new; entry-check findings are still classified against the baseline's checks. Evidence from 0.2.0 replays unchanged.
 
 **0.2.0.** MCP server, audience and saved personas, per-persona verdicts, `tickets`, possible
 fixes (opt-in). Upgrading from 0.1.x: agent findings now have fingerprints made only from the

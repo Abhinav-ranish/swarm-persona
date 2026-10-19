@@ -9,7 +9,7 @@ from swarm_persona import agent, run
 from swarm_persona.agent import Outcome, read_outcome
 from swarm_persona.config import Config
 from swarm_persona.judge import judge, outcome
-from swarm_persona.run import baseline_ran, replay, walk
+from swarm_persona.run import replay, walk
 
 FIXTURE = Path(__file__).parent / 'fixtures' / 'run' / 'evidence.json'
 
@@ -194,7 +194,14 @@ def test_walk_records_personas_cut_off_at_the_timeout(monkeypatch, tmp_path):
     assert judge(ev, ['blocker'])['summary'] == '1/4 personas completed; 3 timed out; 1 issue'  # the 5xx
 
 
-def test_a_baseline_that_only_crashed_or_timed_out_did_not_run():
-    assert not baseline_ran([session('preview', 1), cut_off('baseline', 1), session('baseline', 2, crashed=True)])
-    assert baseline_ran([cut_off('baseline', 1), session('baseline', 2, achieved=False)])
-    assert not baseline_ran([session('preview', 1)])
+
+def test_agent_reports_stay_unclassified_when_no_baseline_persona_walked():
+    def classes(*baseline):
+        ev = evidence(checks=[check('preview', status=500), check('baseline')],
+                      sessions=[session('preview', 1), *baseline], raw=[issue('preview', 1)])
+        return {f['source']: f['classification'] for f in judge(ev, ['blocker'])['findings']}
+
+    # The entry checks still ran on the baseline, so the 5xx stays new and keeps gating.
+    assert classes(cut_off('baseline', 1), session('baseline', 2, crashed=True)) == {
+        'signal': 'new', 'agent': 'unclassified'}
+    assert classes(cut_off('baseline', 1), session('baseline', 2, achieved=False)) == {'signal': 'new', 'agent': 'new'}
