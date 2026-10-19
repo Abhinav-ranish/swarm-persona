@@ -1,0 +1,38 @@
+[
+  {
+    "id": "no-em-dashes",
+    "kind": "convention",
+    "text": "No em dashes anywhere you write: code, comments, docs, commit messages, PR text, brain files. Use a colon, a comma or a new sentence. brain doctor checks .brain/, AGENTS.md and CLAUDE.md.",
+    "paths": [],
+    "created": "2026-10-19",
+    "source": "owner",
+    "tags": ["style", "writing"]
+  },
+  {
+    "id": "fail-closed",
+    "kind": "convention",
+    "text": "Anything new in the guard or preflight fails closed: a request, body or reply that cannot be parsed or judged is refused, never waved through. Tests for a new rule include the malformed and encoded variants, not just the plain one.",
+    "paths": ["src/swarm_persona/guard/", "src/swarm_persona/preflight.py", "tests/test_policy.py"],
+    "created": "2026-10-19",
+    "source": "bf3b558",
+    "tags": ["guard", "preflight", "security"]
+  },
+  {
+    "id": "evidence-is-the-replay-contract",
+    "kind": "convention",
+    "text": "judge.py stays pure: no browser, no model, no network. Anything a verdict depends on must be recorded in evidence.json first, so `swarm-persona replay` and `tickets` rebuild the same findings from a saved run. tests/fixtures/run/evidence.json is a saved run the tests replay.",
+    "paths": ["src/swarm_persona/judge.py", "src/swarm_persona/run.py", "tests/fixtures/run/evidence.json"],
+    "created": "2026-10-19",
+    "source": "bf3b558",
+    "tags": ["replay", "evidence"]
+  },
+  {
+    "id": "commit-message-style",
+    "kind": "convention",
+    "text": "Commit subjects read `Area: what changed; what else changed`, plain words, no prefixes like feat:, no attribution lines. A release commit is just the version (`0.2.0`), and the annotated tag message summarises it.",
+    "paths": [],
+    "created": "2026-10-19",
+    "source": "6d769ff",
+    "tags": ["git", "style"]
+  }
+]

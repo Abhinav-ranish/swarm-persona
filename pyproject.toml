@@ -40,5 +40,9 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/swarm_persona"]
 
+[tool.hatch.build.targets.sdist]
+# Agent memory and guides belong to the repository, not to the package.
+exclude = [".brain", "AGENTS.md", "CLAUDE.md", "tests/test_brain.py"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

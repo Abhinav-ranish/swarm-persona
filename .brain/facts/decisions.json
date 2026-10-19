@@ -1,0 +1,83 @@
+[
+  {
+    "id": "guard-at-network-layer",
+    "kind": "decision",
+    "text": "The write guard is a mitmproxy per browser, not JavaScript in the page: page code, service workers, beacons and frames cannot route around it. Keep safety decisions in guard/policy.py, never in the agent prompt. adr/0001-network-write-guard.md.",
+    "paths": ["src/swarm_persona/guard/", "src/swarm_persona/agent.py"],
+    "created": "2026-10-19",
+    "source": "bf3b558",
+    "tags": ["guard", "adr"]
+  },
+  {
+    "id": "deterministic-judge",
+    "kind": "decision",
+    "text": "Severity, classification and the gate come from rules over recorded evidence, never from a model. A single persona's report is capped at major unless corroborated. adr/0002-deterministic-judge.md.",
+    "paths": ["src/swarm_persona/judge.py", "src/swarm_persona/merge.py"],
+    "created": "2026-10-19",
+    "source": "bf3b558",
+    "tags": ["judge", "severity", "adr"]
+  },
+  {
+    "id": "diff-aware-journeys",
+    "kind": "decision",
+    "text": "Journeys are selected from the diff by ownership globs; the model may only add journeys for unclaimed files, never remove one. A PR that touches no journey runs nothing. adr/0003-diff-aware-journey-selection.md.",
+    "paths": ["src/swarm_persona/journeys.py"],
+    "created": "2026-10-19",
+    "source": "bf3b558",
+    "tags": ["journeys", "selection", "adr"]
+  },
+  {
+    "id": "screenshots-pinned-by-commit",
+    "kind": "decision",
+    "text": "Screenshots are committed to report.images_repo in one commit per run and linked by commit SHA, so a later run never changes an earlier comment's pictures. adr/0004-screenshots-in-images-repo.md.",
+    "paths": ["src/swarm_persona/github.py", "src/swarm_persona/run.py"],
+    "created": "2026-10-19",
+    "source": "5661e3d",
+    "tags": ["screenshots", "github", "adr"]
+  },
+  {
+    "id": "github-app-posting",
+    "kind": "decision",
+    "text": "PR comments and issues can be posted as a GitHub App with a per-repository installation token, signed with the openssl CLI so the package has no crypto dependency. adr/0005-github-app-posting.md.",
+    "paths": ["src/swarm_persona/github.py", "src/swarm_persona/cli.py"],
+    "created": "2026-10-19",
+    "source": "5661e3d",
+    "tags": ["github", "app", "adr"]
+  },
+  {
+    "id": "fingerprints-from-issue-keys",
+    "kind": "decision",
+    "text": "Agent finding fingerprints are built only from the sources' (journey, page, category), never from model-written titles, so they are stable across runs and merge orders. adr/0006-stable-fingerprints.md.",
+    "paths": ["src/swarm_persona/judge.py", "src/swarm_persona/tickets.py", "src/swarm_persona/fixes.py"],
+    "created": "2026-10-19",
+    "source": "a50c885",
+    "tags": ["fingerprint", "adr"]
+  },
+  {
+    "id": "tests-on-codebuild",
+    "kind": "decision",
+    "text": "Tests run on AWS CodeBuild through deploy/aws/test.sh (or locally); the repository has no GitHub Actions workflow of its own. adr/0007-tests-on-codebuild.md.",
+    "paths": ["deploy/aws/test.sh"],
+    "created": "2026-10-19",
+    "source": "e0f4f97",
+    "tags": ["ci", "codebuild", "adr"]
+  },
+  {
+    "id": "possible-fixes-opt-in",
+    "kind": "decision",
+    "text": "Possible fixes are off unless report.suggest_fixes is set: they send PR diff text to the model. They never fail a run and are labelled unverified. adr/0008-possible-fixes-opt-in.md.",
+    "paths": ["src/swarm_persona/fixes.py", "src/swarm_persona/config.py"],
+    "created": "2026-10-19",
+    "source": "aa50085",
+    "tags": ["fixes", "adr"]
+  },
+  {
+    "id": "mcp-server-safety",
+    "kind": "decision",
+    "text": "The MCP server wraps the CLI with a SWARM_PERSONA_CONFIGS allowlist, a private auth.log, generic config errors, a two-run cap under a file lock, and SIGTERM then SIGKILL to the run's process group. adr/0009-mcp-server-safety.md.",
+    "paths": ["src/swarm_persona/mcp_server.py"],
+    "created": "2026-10-19",
+    "source": "d88ddf4",
+    "tags": ["mcp", "adr"]
+  }
+]

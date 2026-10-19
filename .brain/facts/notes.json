@@ -1,0 +1,20 @@
+[
+  {
+    "id": "downstream-app-pins-a-sha",
+    "kind": "note",
+    "text": "The downstream app runs swarm-persona from its own copy of deploy/aws/buildspec.yml with SP_REF pinned to a full commit SHA, and keeps its own config. A release here changes nothing there until someone syncs it (release.md, Downstream sync). Never edit the downstream app's repository from a session in this one.",
+    "paths": ["deploy/aws/buildspec.yml", ".brain/release.md"],
+    "created": "2026-10-19",
+    "source": "owner",
+    "tags": ["downstream", "release"]
+  },
+  {
+    "id": "live-guard-tests-need-mitmdump",
+    "kind": "note",
+    "text": "tests/test_guard_live.py drives a real mitmdump and skips without one; deploy/aws/test.sh installs mitmproxy 11.1.3 and sets SWARM_PERSONA_MITMDUMP so they run there. Locally, a skipped live test is not a pass.",
+    "paths": ["tests/test_guard_live.py", "deploy/aws/test.sh"],
+    "created": "2026-10-19",
+    "source": "357beaa",
+    "tags": ["mitmproxy", "tests"]
+  }
+]

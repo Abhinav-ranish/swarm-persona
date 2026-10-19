@@ -1,0 +1,182 @@
+#!/usr/bin/env python3
+"""swarm-persona agent brain: durable, committed memory for agents working on this repository.
+
+  brain recall "<topic or error>"     ranked facts and doc sections
+  brain context [files...]            facts, docs and tests for these files (default: this branch's diff)
+  brain show <id>                     one fact in full
+  brain remember <kind> "<text>" --paths a,b [--source <commit|PR>] [--id slug] [--tags t1,t2]
+  brain pref add "<text>" [--as handle] | rm <id> | list [--all]
+  brain whoami
+  brain doctor                        schema, anchored paths, index listing, em dashes
+
+Standard library only, Python 3.9 or newer, so it runs on a bare python3 in a fresh worktree.
+Facts are dated leads, not ground truth: the code wins. See .brain/index.md.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+HERE = Path(os.path.realpath(__file__)).parent
+sys.path.insert(0, str(HERE))
+
+from brain_lifecycle import FACT_ID, doctor  # noqa: E402
+from brain_people import add_preference, current_user, load_people, remove_preference, save_json  # noqa: E402
+from brain_recall import (FACT_FILES, changed_files, context_for, fact_paths, load_facts, load_json,  # noqa: E402
+                          recall, tests_for)
+
+BRAIN_DIR = Path(os.environ.get('BRAIN_DIR') or HERE.parent)
+
+
+def one_line(d: dict, full: bool) -> str:
+    text = ' '.join(str(d.get('text') or '').split())
+    if d.get('kind') == 'doc':
+        tag = '[doc]'
+        head = d['title']
+    else:
+        tag = f"[{d.get('kind')} {d.get('created', '?')} {d.get('source', '?')}]"
+        head = d.get('id')
+    body = text if full or len(text) <= 240 else text[:240] + ' ...'
+    return f'{tag} {head}\n    {body}'
+
+
+def slug(text: str) -> str:
+    words = '-'.join(re.findall(r'[a-z0-9]+', text.lower())[:6])[:56].strip('-')
+    return words if len(words) >= 3 else f'fact-{words}'.strip('-')
+
+
+def head_commit() -> str:
+    try:
+        return subprocess.run(['git', '-C', str(BRAIN_DIR.parent), 'rev-parse', '--short', 'HEAD'],
+                              capture_output=True, text=True, check=True).stdout.strip() or 'unknown'
+    except (OSError, subprocess.CalledProcessError):
+        return 'unknown'
+
+
+def remember(kind: str, text: str, paths: list[str], source: str | None, fact_id: str | None,
+             tags: list[str]) -> dict:
+    path = BRAIN_DIR / 'facts' / f'{FACT_FILES[kind]}.json'
+    facts = load_json(path, [])
+    taken = {f.get('id') for f in load_facts(BRAIN_DIR)}
+    if fact_id and not FACT_ID.fullmatch(fact_id):
+        raise SystemExit(f'brain: id {fact_id!r} must be lower-case kebab-case, 3 to 64 characters')
+    base = fact_id or slug(text)
+    new_id, n = base, 2
+    while new_id in taken:
+        if fact_id:
+            raise SystemExit(f'brain: id {fact_id} is taken; `brain show {fact_id}`')
+        new_id, n = f'{base}-{n}', n + 1
+    fact = {'id': new_id, 'kind': kind, 'text': ' '.join(text.split()), 'paths': paths,
+            'created': datetime.date.today().isoformat(), 'source': source or head_commit()}
+    if tags:
+        fact['tags'] = tags
+    save_json(path, [*facts, fact])
+    return fact
+
+
+def csv(value: str | None) -> list[str]:
+    return [x.strip() for x in (value or '').split(',') if x.strip()]
+
+
+def main(argv: list[str]) -> int:
+    p = argparse.ArgumentParser(prog='brain', description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = p.add_subparsers(dest='cmd', required=True)
+    r = sub.add_parser('recall')
+    r.add_argument('query', nargs='+')
+    r.add_argument('--limit', type=int, default=8)
+    r.add_argument('--full', action='store_true')
+    c = sub.add_parser('context')
+    c.add_argument('files', nargs='*')
+    c.add_argument('--limit', type=int, default=12)
+    c.add_argument('--full', action='store_true')
+    s = sub.add_parser('show')
+    s.add_argument('id')
+    m = sub.add_parser('remember')
+    m.add_argument('kind', choices=sorted(FACT_FILES))
+    m.add_argument('text', nargs='+')
+    m.add_argument('--paths', help='comma-separated files or dirs the fact is about')
+    m.add_argument('--source', help='the commit, PR or person it came from (default: HEAD)')
+    m.add_argument('--id')
+    m.add_argument('--tags')
+    pr = sub.add_parser('pref')
+    pr.add_argument('action', choices=['add', 'rm', 'list'])
+    pr.add_argument('rest', nargs='*')
+    pr.add_argument('--as', dest='as_handle')
+    pr.add_argument('--all', action='store_true')
+    sub.add_parser('whoami')
+    sub.add_parser('doctor')
+    args = p.parse_args(argv)
+
+    if args.cmd == 'recall':
+        hits = recall(BRAIN_DIR, ' '.join(args.query), args.limit)
+        if not hits:
+            print('(nothing in the brain for that: read the code, then `brain remember` what it could not show)')
+        for _, d in hits:
+            print(one_line(d, args.full))
+        return 0
+    if args.cmd == 'context':
+        files = [f.strip().removeprefix('./') for f in args.files] or changed_files(BRAIN_DIR)
+        if not files:
+            print('(no changed files on this branch; pass paths: brain context <file...>)')
+            return 0
+        print(f"context for {len(files)} file(s): {', '.join(files[:6])}{', ...' if len(files) > 6 else ''}")
+        hits = context_for(BRAIN_DIR, files, args.limit)
+        for _, d in hits:
+            print(one_line(d, args.full))
+        if not hits:
+            print('(no facts or docs anchored to these files)')
+        tests = list(dict.fromkeys(t for f in files for t in tests_for(BRAIN_DIR, f)))
+        if tests:
+            print('tests that import them: ' + ' '.join(tests))
+        return 0
+    if args.cmd == 'show':
+        fact = next((f for f in load_facts(BRAIN_DIR) if f.get('id') == args.id), None)
+        print(one_line(fact, True) + f"\n    paths: {', '.join(fact_paths(fact)) or '-'}" if fact
+              else f'no fact with id {args.id}')
+        return 0 if fact else 1
+    if args.cmd == 'remember':
+        fact = remember(args.kind, ' '.join(args.text), csv(args.paths), args.source, args.id, csv(args.tags))
+        print(f"remembered {fact['id']} in facts/{FACT_FILES[args.kind]}.json; commit it with the change")
+        return 0
+    if args.cmd == 'pref':
+        try:
+            if args.action == 'add' and args.rest:
+                handle, pref = add_preference(BRAIN_DIR, ' '.join(args.rest), args.as_handle)
+                print(f"{handle}: added {pref['id']} {pref['text']!r}")
+                return 0
+            if args.action == 'rm' and args.rest:
+                handle = remove_preference(BRAIN_DIR, args.rest[0])
+                print(f'{handle}: removed {args.rest[0]}' if handle else f'none of your preferences has id {args.rest[0]}')
+                return 0 if handle else 1
+        except ValueError as error:
+            print(f'brain: {error}', file=sys.stderr)
+            return 1
+        if args.action == 'list':
+            people = load_people(BRAIN_DIR) if args.all else [x for x in [current_user(BRAIN_DIR)['person']] if x]
+            if not people:
+                print('(no preferences recorded; brain pref add "<text>")')
+            for person in people:
+                print(f"{person['handle']}:")
+                for x in person.get('preferences') or []:
+                    print(f"  {x['id']}  {x['text']}")
+            return 0
+        p.error('usage: brain pref add "<text>" [--as handle] | rm <id> | list [--all]')
+    if args.cmd == 'whoami':
+        me = current_user(BRAIN_DIR)
+        print(f"{me['handle']} (via {me['via']})" + ('' if me['person'] else '; `brain pref add` creates the file'))
+        return 0
+    if args.cmd == 'doctor':
+        issues = doctor(BRAIN_DIR)
+        print('\n'.join(issues) if issues else 'brain is healthy')
+        return 1 if issues else 0
+    return 2
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv[1:]))
