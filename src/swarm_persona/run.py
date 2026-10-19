@@ -126,6 +126,15 @@ async def walk(cfg: Config, ctx: dict, personas: list[dict], label: str, origin:
     results = []
     for persona, task in zip(personas, tasks):
         if task not in done:
+            # Cut off, possibly before it started: a failed session, never dropped, so the verdicts
+            # and the summary still count it. Its issues are left out: it never finished its walk.
+            known = task.result() if not task.cancelled() and not task.exception() else None
+            minutes = cfg.budget.timeout_minutes
+            results.append({**persona, 'target': label, 'verdict': f'TIMED OUT: cut off at the {minutes}-minute timeout',
+                            'achieved': False, 'crashed': False, 'timed_out': True, 'timeout_minutes': minutes,
+                            'done': False, 'success': None, 'worked_well': [],
+                            'steps': (known or {}).get('steps', 0), 'tokens': (known or {}).get('tokens', 0),
+                            'seconds': minutes * 60, 'issues': [], 'guard_blocked': [], 'server_errors': []})
             continue
         if task.exception():  # a persona that broke before its agent ran is reported, never dropped
             error = task.exception()

@@ -327,6 +327,13 @@ sign-out command runs.
 
 ## Changes
 
+**0.2.1.** A persona cut off at `budget.timeout_minutes` is now a session in the report, failed
+with "cut off at the N-minute timeout", instead of being left out. The summary counts every
+planned persona, for example "2/4 personas completed; 2 timed out; 3 issues". A cut-off persona
+counts on neither side of the "personas could not finish" journey rule, like a crash: the timeout
+is one clock for every persona on a target, so it says nothing about the journey. Evidence from
+0.2.0 replays unchanged.
+
 **0.2.0.** MCP server, audience and saved personas, per-persona verdicts, `tickets`, possible
 fixes (opt-in). Upgrading from 0.1.x: agent findings now have fingerprints made only from the
 sources' journey, page and category, so the ticket marker for an agent finding is different from

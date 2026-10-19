@@ -1,12 +1,15 @@
+import asyncio
 import json
 from pathlib import Path
 
 import pytest
-from evidence_builder import check, evidence, session
+from evidence_builder import check, evidence, issue, session
 
+from swarm_persona import agent, run
 from swarm_persona.agent import Outcome, read_outcome
+from swarm_persona.config import Config
 from swarm_persona.judge import judge, outcome
-from swarm_persona.run import replay
+from swarm_persona.run import replay, walk
 
 FIXTURE = Path(__file__).parent / 'fixtures' / 'run' / 'evidence.json'
 
@@ -17,6 +20,7 @@ def verdicts(ev):
 
 @pytest.mark.parametrize('session_kw, fired, expected', [
     ({'crashed': True, 'verdict': 'ACHIEVED: fine', 'success': True}, [], ('fail', 'evidence')),
+    ({'timed_out': True, 'timeout_minutes': 30, 'verdict': 'TIMED OUT: cut off', 'steps': 0}, [], ('fail', 'evidence')),
     ({'done': True, 'success': True, 'verdict': 'ACHIEVED: fine'}, [], ('pass', 'evidence')),
     ({'done': True, 'success': True, 'verdict': 'ACHIEVED: fine'}, ['page-error'], ('partial', 'evidence')),
     ({'done': True, 'success': True, 'verdict': 'GAVE UP: lost'}, [], ('partial', 'evidence')),
@@ -101,3 +105,88 @@ def test_worked_well_text_is_defanged_in_the_report(tmp_path):
     (tmp_path / 'evidence.json').write_text(json.dumps(ev))
     report = replay(tmp_path)['report']
     assert '@octocat' not in report and 'https://evil.net' not in report and ' #12' not in report
+
+
+def cut_off(target, pid, **kw):
+    return session(target, pid, achieved=False, verdict='TIMED OUT: cut off at the 30-minute timeout', done=False,
+                   success=None, steps=0, tokens=0, timed_out=True, timeout_minutes=30, **kw)
+
+
+def test_a_cut_off_persona_fails_on_the_evidence_with_the_timeout_named():
+    assert outcome(cut_off('preview', 1), [], 25) == ('fail', 'evidence', 'cut off at the 30-minute timeout')
+    assert outcome({'timed_out': True}, [], 25)[2] == 'cut off at the timeout'
+
+
+def test_the_summary_counts_cut_off_personas():
+    ev = evidence(sessions=[session('preview', 1), session('preview', 2), cut_off('preview', 3), cut_off('preview', 4),
+                            cut_off('baseline', 1)],
+                  raw=[issue('preview', 1, category='ux'), issue('preview', 1, category='copy'),
+                       issue('preview', 2, category='layout')])
+    result = judge(ev, ['blocker'])
+    assert result['summary'] == '2/4 personas completed; 2 timed out; 3 issues'
+    assert [(v['result'], v['timed_out']) for v in result['personas']] == [
+        ('pass', False), ('pass', False), ('fail', True), ('fail', True), ('fail', True)]
+
+
+def test_a_cut_off_persona_counts_on_neither_side_of_the_journey_rule():
+    def journey_titles(*sessions):
+        return [f['title'] for f in judge(evidence(sessions=sessions), ['blocker'])['findings'] if f['source'] == 'journey']
+
+    # Cut off on the preview where the baseline finished: the shared clock, not the journey.
+    assert journey_titles(cut_off('preview', 1), session('baseline', 1)) == []
+    # Gave up on the preview, cut off on the baseline: the baseline did not fail the journey too.
+    assert journey_titles(session('preview', 1, achieved=False), cut_off('baseline', 1)) == []
+    # The rule still fires on the personas that did walk.
+    assert journey_titles(session('preview', 1, achieved=False), cut_off('preview', 2), session('baseline', 1),
+                          cut_off('baseline', 2)) == ['Personas could not finish write on desktop']
+
+
+def test_replay_rebuilds_cut_off_personas_and_old_evidence_still_replays(tmp_path):
+    ev = evidence(sessions=[session('preview', 1, name='Marcus'), cut_off('preview', 2, name='Priya')])
+    (tmp_path / 'evidence.json').write_text(json.dumps(ev))
+    result = replay(tmp_path)
+    assert result['summary'] == '1/2 personas completed; 1 timed out; 0 issues'
+    assert '| Priya (desktop) | write | **fail**: cut off at the 30-minute timeout |' in result['report']
+    (tmp_path / 'evidence.json').write_text(FIXTURE.read_text())
+    old = replay(tmp_path)
+    assert 'timed out' not in old['summary'] and not any(v['timed_out'] for v in old['personas'])
+
+
+def test_walk_records_personas_cut_off_at_the_timeout(monkeypatch, tmp_path):
+    c = Config.model_validate({'app': {'name': 'A', 'description': 'd', 'url': 'https://preview.example.com'},
+                               'personas': {'concurrency': 2}, 'budget': {'timeout_minutes': 30}})
+    personas = [{'id': n, 'name': f'P{n}', 'device': 'desktop', 'goal': 'g', 'journey': 'write'} for n in (1, 2, 3, 4)]
+
+    async def fake_run(cfg, ctx, persona, label, origin, proxy, state, shots, headed):
+        result = {**persona, 'target': label, 'verdict': 'ACHIEVED: ok', 'achieved': True, 'crashed': False,
+                  'done': True, 'success': True, 'worked_well': [], 'steps': 4, 'tokens': 10, 'seconds': 1,
+                  'issues': [], 'guard_blocked': [], 'server_errors': []}
+        if persona['id'] == 1:
+            return result
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            if persona['id'] == 3:  # gave back what it had when it was cancelled
+                return {**result, 'steps': 7, 'tokens': 50, 'issues': [{'title': 'half-seen'}]}
+            raise
+        return result
+
+    real_wait = asyncio.wait
+
+    async def short_wait(tasks, timeout=None):
+        return await real_wait(tasks, timeout=0.2)
+
+    monkeypatch.setattr(agent, 'run_persona', fake_run)
+    monkeypatch.setattr(run.asyncio, 'wait', short_wait)
+    notes = []
+    sessions = asyncio.run(walk(c, {}, personas, 'preview', 'https://preview.example.com', [None] * 4, None,
+                                tmp_path, {'tokens': 0}, notes, False))
+    assert [s['id'] for s in sessions] == [1, 2, 3, 4]  # P4 never started: queued behind the semaphore
+    assert sessions[0].get('timed_out') is None and sessions[0]['steps'] == 4
+    for s in sessions[1:]:
+        assert s['timed_out'] and s['timeout_minutes'] == 30 and not s['achieved'] and not s['crashed']
+        assert s['verdict'] == 'TIMED OUT: cut off at the 30-minute timeout' and s['issues'] == []
+    assert [(s['steps'], s['tokens']) for s in sessions[1:]] == [(0, 0), (7, 50), (0, 0)]
+    assert notes == ['Timeout: 3 persona run(s) on preview were cut off at 30 minutes.']
+    ev = evidence(sessions=[{k: v for k, v in s.items() if k != 'issues'} for s in sessions])
+    assert judge(ev, ['blocker'])['summary'] == '1/4 personas completed; 3 timed out; 0 issues'

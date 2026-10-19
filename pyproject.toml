@@ -1,6 +1,6 @@
 [project]
 name = "swarm-persona"
-version = "0.2.0"
+version = "0.2.1"
 description = "Simulated users walk your web app behind a network write guard and report UX issues on the PR."
 readme = "README.md"
 license = "MIT"

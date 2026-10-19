@@ -16,7 +16,8 @@ Severity is set by rules, never raised by a model:
   signal fired on the same journey. The merge model's own severity is ignored.
 
 Each persona also gets pass, fail or partial against its journey's success criteria, decided from
-the evidence (crashed, done and marked successful, hit max_steps, a 5xx during its own walk). Only
+the evidence (crashed, cut off at the timeout, done and marked successful, hit max_steps, a 5xx
+during its own walk). Only
 when the evidence is silent does the persona's own ACHIEVED / GAVE UP verdict decide, labelled
 self-report.
 """
@@ -174,7 +175,9 @@ def journey_findings(evidence: dict) -> list[dict]:
         return []
     outcome: dict[tuple, dict[str, list[bool]]] = defaultdict(lambda: defaultdict(list))
     for x in evidence['sessions']:
-        if x.get('journey') and not x.get('crashed'):
+        # A persona cut off at the run's timeout says nothing about the journey: the clock is shared by
+        # every persona on the target, and some never start. Like a crash, it counts on neither side.
+        if x.get('journey') and not x.get('crashed') and not x.get('timed_out'):
             outcome[(x['journey'], x['device'])][x['target']].append(bool(x.get('achieved')))
     findings = []
     for (journey, device), by in sorted(outcome.items()):
@@ -197,6 +200,9 @@ def outcome(session: dict, fired: list[str], max_steps: int | None) -> tuple[str
     """(pass / fail / partial, evidence / self-report, why) for one persona's walk."""
     if session.get('crashed'):
         return 'fail', 'evidence', 'crashed before finishing'
+    if session.get('timed_out'):
+        minutes = session.get('timeout_minutes')
+        return 'fail', 'evidence', f'cut off at the {minutes}-minute timeout' if minutes else 'cut off at the timeout'
     said = str(session.get('verdict') or '').strip().upper()
     signalled = f"hard signals fired: {', '.join(fired)}"
     if session.get('success') is True:
@@ -226,7 +232,7 @@ def persona_verdicts(evidence: dict) -> list[dict]:
         result, basis, reason = outcome(x, kinds, max_steps)
         out.append({'target': x['target'], 'id': x.get('id'), 'name': x['name'], 'journey': x.get('journey'),
                     'device': x['device'], 'success_criteria': x.get('success_criteria') or '',
-                    'result': result, 'basis': basis, 'reason': reason})
+                    'result': result, 'basis': basis, 'reason': reason, 'timed_out': bool(x.get('timed_out'))})
     return out
 
 
@@ -248,10 +254,12 @@ def summary(verdicts: list[dict], findings: list[dict]) -> str:
     walked = [v for v in verdicts if v['target'] == 'preview']
     done = sum(1 for v in walked if v['result'] == 'pass')
     partial = sum(1 for v in walked if v['result'] == 'partial')
+    cut = sum(1 for v in walked if v.get('timed_out'))
     issues = f"{len(findings)} issue{'s' if len(findings) != 1 else ''}"
     if not walked:
         return f'No personas walked; {issues}'
-    return f"{done}/{len(walked)} personas completed" + (f' ({partial} partly)' if partial else '') + f'; {issues}'
+    return f"{done}/{len(walked)} personas completed" + (f' ({partial} partly)' if partial else '') + (
+        f'; {cut} timed out' if cut else '') + f'; {issues}'
 
 
 def judge(evidence: dict, fail_on: list[str], fail_on_unclassified: bool = False) -> dict:
