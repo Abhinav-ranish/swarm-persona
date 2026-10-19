@@ -44,7 +44,7 @@ def split_diff(diff: str) -> dict[str, str]:
 
 # Never sent to the model, whatever a journey owns: env files, keys and anything named like a secret.
 SECRET_NAME = re.compile(r'(^\.env|\.(pem|key|p12|pfx|jks|keystore|asc|gpg)$|^id_(rsa|dsa|ecdsa|ed25519)|'
-                         r'secret|credential|passw|^\.(npmrc|netrc|pypirc)$)', re.I)
+                         r'secret|credential|passw|^\.(npmrc|netrc|pypirc)$)', re.IGNORECASE)
 
 
 def secret_like(path: str) -> bool:
