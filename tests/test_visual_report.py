@@ -15,7 +15,7 @@ def test_replay_builds_a_portable_visual_report_with_top_three_and_all_findings(
     (tmp_path / 'evidence.json').write_text(json.dumps(ev))
     replay(tmp_path)
     page = (tmp_path / 'report.html').read_text()
-    assert 'Start with these 3' in page and 'All 5 findings' in page
+    assert 'Start with these 3' in page and '2 more findings' in page
     assert 'data:image/png;base64,' in page
     assert 'Suggested next step' in page
     assert 'Agent-reported' in page
@@ -55,6 +55,7 @@ def test_visual_report_explains_incomplete_tests_and_check_only_limitations(tmp_
     replay(tmp_path)
     page = (tmp_path / 'report.html').read_text()
     assert 'Entry checks only' in page and 'No personas attempted the task' in page
+    assert 'Checks completed' in page
 
 
 def test_retest_comparison_is_visible_but_does_not_claim_a_fix(tmp_path):
@@ -108,3 +109,31 @@ def test_entry_screenshots_are_visible_outside_collapsed_run_details(tmp_path):
     assert 'Page captures' in page
     assert page.index('data:image/png') < page.index('<details><summary>Run details')
     assert 'first-task' in page or 'write' in page
+
+
+def test_findings_are_not_duplicated_and_run_notes_are_prominent(tmp_path):
+    ev = evidence(sessions=[session('preview', 1)],
+                  raw=[issue('preview', i, title=f'Unique finding {i}') for i in range(5)], baseline_ran=False)
+    ev['meta']['notes'] = ['Recorded demonstration, not a live persona test.']
+    (tmp_path / 'evidence.json').write_text(json.dumps(ev))
+    replay(tmp_path)
+    page = (tmp_path / 'report.html').read_text()
+    assert page.count('Unique finding 0') == 1
+    assert '2 more findings' in page
+    assert page.index('Recorded demonstration') < page.index('</header>')
+    assert page.count('Confirm the observation before changing the product.') == 1
+
+
+def test_captures_have_dimensions_result_labels_and_explain_missing_checks(tmp_path):
+    (tmp_path / 'shots').mkdir()
+    data = b'\x89PNG\r\n\x1a\n' + b'\x00\x00\x00\x0dIHDR' + (1440).to_bytes(4, 'big') + (900).to_bytes(4, 'big')
+    (tmp_path / 'shots' / 'desktop.png').write_bytes(data)
+    ev = evidence(checks=[check('preview', screenshot='shots/desktop.png'), check('preview', device='mobile')], baseline_ran=False)
+    ev['meta'].update(mode='checks-only', targets=['preview'], checks_per_target=2)
+    (tmp_path / 'evidence.json').write_text(json.dumps(ev))
+    replay(tmp_path)
+    page = (tmp_path / 'report.html').read_text()
+    assert 'width="1440" height="900"' in page
+    assert 'HTTP 200' in page
+    assert '1 of 2 entry checks have no saved screenshot' in page
+    assert 'No issues reported' not in page

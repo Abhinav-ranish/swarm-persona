@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 def text(value) -> str:
-    return escape(str(value or '').replace(chr(0x2014), ', '), quote=True)
+    return escape(str(value if value is not None else '').replace(chr(0x2014), ', '), quote=True)
 
 
 MISSING_IMAGE = ('<div class="missing-image"><strong>Screenshot unavailable</strong><p>The original image was '
@@ -32,8 +32,13 @@ def screenshot(out: Path, name: str, budget: list[int] | None = None,
         return MISSING_IMAGE
     if budget is not None:
         budget[0] -= len(data)
+    width = int.from_bytes(data[16:20], 'big') if len(data) >= 24 and data[12:16] == b'IHDR' else 0
+    height = int.from_bytes(data[20:24], 'big') if width else 0
+    dimensions = f'width="{width}" height="{height}" ' if 0 < width <= 100_000 and 0 < height <= 100_000 else ''
+    ratio = min(3, max(.25, width / height)) if dimensions else 1
     loading = 'eager' if eager else 'lazy'
-    return (f'<figure><figcaption>{text(label)}</figcaption><img loading="{loading}" '
+    return (f'<figure style="--capture-ratio:{ratio:.3f};--capture-width:{ratio * 400:.0f}px">'
+            f'<figcaption>{text(label)}</figcaption><img {dimensions}loading="{loading}" '
             f'alt="{text(label)}" src="data:image/png;base64,' + base64.b64encode(data).decode() + '"></figure>')
 
 
@@ -55,9 +60,8 @@ def finding(out: Path, item: dict, budget: list[int], show_images: bool = True) 
     severity = item['severity'] if item['severity'] in ('blocker', 'major', 'minor', 'polish') else 'minor'
     return (f'<article class="finding {severity}"><p class="eyebrow"><span class="badge">{text(item["severity"])}</span> {source}</p>'
             f'<h3>{text(item["id"])}. {text(item["title"])}</h3><p>{text(item["detail"])}</p>'
-            f'<p class="muted">Observed on: {text(", ".join(item.get("paths", [])) or "task journey")}. '
-            f'{text(item["rule"])}</p><h4>Suggested next step</h4><p>{text(action)}</p>'
-            '<p class="muted">Suggestion is unverified. Confirm the observation before changing the product.</p>'
+            f'<p class="muted">Observed on {text(", ".join(item.get("paths", [])) or "task journey")} · '
+            f'Basis: {text(item["rule"])}</p><h4>Suggested next step (unverified)</h4><p>{text(action)}</p>'
             f'{images}</article>')
 
 
@@ -66,7 +70,7 @@ CSS = """
 --paper:#f6f7f3;--surface:#fff;font-family:system-ui,-apple-system,sans-serif;color:var(--ink);background:var(--paper)}
 *{box-sizing:border-box}body{margin:0}main{max-width:1120px;margin:auto;padding:0 32px 64px}
 .masthead{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:24px 0;border-bottom:1px solid var(--line)}
-.brand{font-size:17px;font-weight:750;letter-spacing:-.04em}.brand::before{content:'+';display:inline-grid;place-items:center;
+.brand{font-size:17px;font-weight:750;letter-spacing:-.04em;white-space:nowrap}.brand::before{content:'+';display:inline-grid;place-items:center;
 width:28px;height:28px;margin-right:10px;border-radius:8px;background:var(--accent);color:white;font-size:22px;font-weight:400}
 .edition{color:var(--muted);font-size:12px;letter-spacing:.06em;text-transform:uppercase}
 header{padding:40px 0 24px}h1{font-family:Georgia,serif;font-weight:400;font-size:clamp(36px,5.5vw,60px);letter-spacing:-.045em;line-height:1.08;margin:12px 0 20px}
@@ -84,14 +88,14 @@ article,details,.panel{background:var(--surface);border:1px solid var(--line);bo
 .finding>p{max-width:85ch}summary{cursor:pointer;min-height:44px;align-content:center;font-weight:600;font-size:14px}
 summary:hover{color:var(--accent)}summary:focus-visible{outline:3px solid var(--accent);outline-offset:6px;border-radius:4px}
 details[open]>summary{margin-bottom:20px}details article{padding:24px 0;border:0;border-top:1px solid var(--line);border-radius:0}
-.captures{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;align-items:start}.captures>div{min-width:0}
+.captures{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}.captures>figure{min-width:0;flex:var(--capture-ratio,1) 1 var(--capture-width,320px)}
 figure{margin:24px 0 0;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#f1f3ef}
 figcaption{padding:12px 16px;border-bottom:1px solid var(--line);background:white;font-size:12px;font-weight:550}
 img{display:block;width:100%;height:auto;max-height:560px;object-fit:contain;object-position:top}
-.captures figure{margin:0}.captures img{height:360px}.missing-image{padding:24px;border:1px dashed #bdc9c0;border-radius:10px;background:#f8faf7;margin-top:20px;color:var(--muted);font-size:13px}.captures .missing-image{margin-top:0}
+.captures figure{margin:0}.captures img{height:auto;max-height:none}.missing-image{padding:24px;border:1px dashed #bdc9c0;border-radius:10px;background:#f8faf7;margin-top:20px;color:var(--muted);font-size:13px}.captures .missing-image{margin-top:0;flex:1 1 320px}
 .missing-image p{margin-bottom:0}footer{border-top:1px solid var(--line);margin-top:40px;padding-top:24px;max-width:80ch}ul{padding-left:22px}
-@media(max-width:640px){main{padding:0 20px 40px}.masthead{padding:20px 0}.edition{font-size:10px}header{padding:28px 0 16px}
-article,details,.panel{padding:20px;border-radius:12px}.captures{grid-template-columns:1fr}.stat{padding:16px 12px}.stat strong{font-size:25px}.stat span{font-size:11px}.captures img{height:auto;max-height:420px}}
+@media(max-width:640px){main{padding:0 20px 40px}.masthead{padding:20px 0}.edition{display:none}header{padding:28px 0 16px}
+article,details,.panel{padding:20px;border-radius:12px}.captures>figure{flex-basis:100%}.stat{padding:16px 12px}.stat strong{font-size:25px}.stat span{font-size:11px}}
 @media print{body{background:white}main{max-width:none;padding:0}.captures img,img{max-height:400px}article,figure{break-inside:avoid}}
 """
 
@@ -111,10 +115,11 @@ def render(out: Path, evidence: dict, verdict: dict) -> str:
              f'<title>{title} | {text(meta.get("title"))}</title><style>{CSS}</style></head><body><main>',
              '<div class="masthead"><span class="brand">swarm-persona</span><span class="edition">Research report · Local evidence</span></div>',
              f'<header><p class="eyebrow">Observe. Understand. Retest.</p><h1>{title}</h1>',
-             f'<p>{text(meta.get("title"))}</p><p class="muted">{text(meta.get("url"))}</p></header>']
+             f'<p>{text(meta.get("title"))}</p><p class="muted">{text(meta.get("url"))}</p>',
+             *[f'<p class="muted">{text(n)}</p>' for n in meta.get('notes', [])], '</header>']
     parts.append('<section class="stats" aria-label="Run overview">'
                  f'<div class="stat"><strong>{len(findings)}</strong><span>Findings reported</span></div>'
-                 f'<div class="stat"><strong>{health["completed"]}/{health["planned"]}</strong><span>Attempts completed</span></div>'
+                 f'<div class="stat"><strong>{health["completed"]}/{health["planned"]}</strong><span>{"Checks" if checks_only else "Attempts"} completed</span></div>'
                  f'<div class="stat"><strong>{len(evidence.get("checks", []))}</strong><span>Entry checks</span></div></section>')
     if incomplete:
         parts.append(f'<section class="notice"><h2>Could not finish testing</h2><p>'
@@ -143,23 +148,28 @@ def render(out: Path, evidence: dict, verdict: dict) -> str:
                      'An observation missing from this run does not prove a fix. Agents can take different paths.</p></section>')
     if findings:
         parts.append(f'<h2>Start with these {min(3, len(findings))}</h2>')
+        parts.append('<p class="muted">Suggestions are unverified. Confirm the observation before changing the product.</p>')
         parts.extend(finding(out, f, image_budget) for f in findings[:3])
-        parts.append(f'<details><summary>All {len(findings)} findings</summary>')
-        parts.extend(finding(out, f, image_budget, show_images=n >= 3) for n, f in enumerate(findings))
-        parts.append('</details>')
-    elif not incomplete and health['state'] != 'skipped':
+        if len(findings) > 3:
+            parts.append(f'<details><summary>{len(findings) - 3} more findings</summary>')
+            parts.extend(finding(out, f, image_budget) for f in findings[3:])
+            parts.append('</details>')
+    elif not incomplete and health['state'] != 'skipped' and not checks_only:
         parts.append('<p class="panel">No issues reported in this test. This does not establish that the product is usable.</p>')
     if verdict.get('worked_well'):
         parts.append('<section class="panel"><h2>What agents liked</h2><ul>' + ''.join(
             f'<li>{text(w["note"])} <span class="muted">({text(w["persona"])})</span></li>'
             for w in verdict['worked_well']) + '</ul></section>')
     captures = [c for c in evidence.get('checks', []) if c.get('screenshot')]
+    missing = len(evidence.get('checks', [])) - len(captures)
+    if missing:
+        parts.append(f'<p class="muted">{missing} of {len(evidence["checks"])} entry checks have no saved screenshot.</p>')
     if captures:
         parts.append('<section aria-label="Page captures"><h2>Page captures</h2>'
                      '<p class="muted">Entry pages captured by the browser. These show the page at the start of the task.</p><div class="captures">')
         for n, c in enumerate(captures):
-            label = f'{c["device"].title()} · {c["target"]} · {c["journey"]}'
-            parts.append('<div>' + screenshot(out, c['screenshot'], image_budget, label, eager=n < 2) + '</div>')
+            label = f'{c["device"].title()} · {c["target"]} · {c["journey"]} · HTTP {c.get("status") or "unavailable"}'
+            parts.append(screenshot(out, c['screenshot'], image_budget, label, eager=n < 2))
         parts.append('</div></section>')
     parts.append('<details><summary>Run details and persona outcomes</summary>')
     parts.append(f'<p>Execution: {text(health["state"])}. {health["completed"]}/{health["planned"]} attempts.</p><ul>')
@@ -167,12 +177,12 @@ def render(out: Path, evidence: dict, verdict: dict) -> str:
         parts.append(f'<li>{text(p["name"])} ({text(p["device"])}, {text(p["target"])}): '
                      f'{text(p["result"])}. {text(p["reason"])}</li>')
     parts.append('</ul>')
-    for note in meta.get('notes', []):
-        parts.append(f'<p>{text(note)}</p>')
     for c in evidence.get('checks', []):
         parts.append(f'<p>Entry check: {text(c["journey"])} ({text(c["device"])}, {text(c["target"])}). '
                      f'Status: {text(c.get("status") or c.get("error"))}</p>')
-    parts.append(f'<p class="muted">Model: {text(meta.get("model"))}. Run: {text(meta.get("run_id"))}.</p></details>')
-    parts.append('<footer class="muted">Generated from saved evidence. Screenshots are embedded locally. '
+    run_id = f' Run: {text(meta["run_id"])}.' if meta.get('run_id') else ''
+    parts.append(f'<p class="muted">Model: {text(meta.get("model"))}.{run_id}</p></details>')
+    embedded = ' Available screenshots are embedded locally.' if image_budget[0] < 15_000_000 else ''
+    parts.append(f'<footer class="muted">Generated from saved evidence.{embedded} '
                  'The report loads no external resources. Markdown, JSON and original evidence are beside this file.</footer>')
     return ''.join(parts) + '</main></body></html>'

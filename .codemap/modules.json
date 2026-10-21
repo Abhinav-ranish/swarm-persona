@@ -8,7 +8,7 @@
   "mdPath": ".codemap/codemap.md",
   "spineDesc": "Guided setup or CLI -> run orchestration -> guarded entry checks and persona walks -> deterministic judge and execution health -> portable local HTML, Markdown and JSON. Retests reuse recorded personas; optional publication remains separate.",
   "rev": "4550c152ff3ac05983fd7d093686a59fb8af9b73",
-  "tracked_loc": 4260,
+  "tracked_loc": 4270,
   "tracked_files": 31
  },
  "bands": [
@@ -287,8 +287,8 @@
     "config"
    ],
    "desc": "Portable local HTML with ranked findings, embedded screenshots, next steps and retest observations, plus Markdown and JSON. Escapes untrusted text and makes incomplete execution explicit.",
-   "loc": 351,
-   "contentHash": "f58ca03446500ffa2c33643f8fb0253af6bab09129d63705423ea7cd09699790"
+   "loc": 361,
+   "contentHash": "602f81f46861e6791e40cd06b6b9d738509a04da277ccf7346fbb18c6b26f588"
   },
   {
    "id": "tickets",
