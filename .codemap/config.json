@@ -1,0 +1,8 @@
+{
+  "lang": "en",
+  "project": "swarm-persona",
+  "subtitle": "PR-aware browser personas, guarded requests, deterministic verdicts \u00b7 structure only",
+  "outputDir": ".codemap",
+  "htmlFile": "codemap.html",
+  "mdFile": "codemap.md"
+}

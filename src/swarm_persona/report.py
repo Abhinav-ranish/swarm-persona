@@ -56,12 +56,20 @@ def render(meta: dict, verdict: dict, sessions: list[dict], checks: list[dict], 
     walked = [s for s in sessions if s['target'] == 'preview']
     verdicts = verdict.get('personas') or []
     preview = [v for v in verdicts if v['target'] == 'preview']
-    gate = 'Passed' if verdict['passed'] else f"**Failed** ({len(verdict['gating'])} new at {'/'.join(meta['fail_on'])})"
-    tally = ', '.join(f"{sum(1 for v in preview if v['result'] == r)} {r}" for r in ('pass', 'partial', 'fail'))
+    healthy = verdict.get('run_health', {}).get('state') == 'complete'
+    gate = ('Passed' if verdict['gate_passed'] else
+            f"**Failed** ({len(verdict['gating'])} new at {'/'.join(meta['fail_on'])})")
+    if not healthy:
+        gate = 'Testing incomplete; defect gate: ' + gate
+    tally = ', '.join(f"{sum(1 for v in preview if v['result'] == r)} {r}" for r in ('pass', 'partial', 'fail', 'not-run'))
     if verdict.get('summary'):
         lines += [f"**{safe(verdict['summary'], 120)}**", '']
+    if meta.get('mode') == 'checks-only':
+        lines += ['Entry checks only: no personas attempted the task.', '']
+    else:
+        lines += ['Task completion is agent-reported, not independently verified.', '']
     lines += ['| Gate | Personas | Findings |', '|---|---|---|',
-              f"| {gate} | {len(walked)} walked: {tally} | {counts(findings)} |", '']
+              f"| {gate} | {len(walked)} attempts: {tally} | {counts(findings)} |", '']
     if preview:
         lines += ['| Persona | Journey | Verdict |', '|---|---|---|']
         lines += [f"| {safe(v['name'], 40)} ({v['device']}) | {safe(v['journey'] or '-', 60)} | {result_text(v)} |"

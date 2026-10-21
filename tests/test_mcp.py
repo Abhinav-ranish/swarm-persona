@@ -286,3 +286,12 @@ def test_the_cap_check_and_first_write_happen_under_a_file_lock(home, monkeypatc
     mcp_server.start(str(EXAMPLE))
     assert events == [('flock', mcp_server.fcntl.LOCK_EX), ('save',), ('flock', mcp_server.fcntl.LOCK_UN)]
     assert (home / '.lock').exists()
+
+
+def test_incomplete_report_is_distinct_from_failure_to_start(home):
+    run_id = mcp_server.start(str(EXAMPLE))['run_id']
+    out = home / run_id / 'out'
+    out.mkdir()
+    (out / 'report.json').write_text(json.dumps({'run_health': {'state': 'incomplete'}}))
+    finish(2)
+    assert mcp_server.status(run_id)['state'] == 'incomplete'

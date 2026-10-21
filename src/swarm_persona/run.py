@@ -98,6 +98,12 @@ def fit_budget(cfg: Config, personas: list[dict], targets: int, notes: list[str]
     return personas
 
 
+def unfinished_session(persona: dict, label: str, status: str, reason: str) -> dict:
+    return {**persona, 'target': label, 'status': status, 'verdict': reason, 'achieved': False,
+            'crashed': status == 'crashed', 'done': False, 'success': None, 'worked_well': [],
+            'steps': 0, 'tokens': 0, 'seconds': 0, 'issues': [], 'guard_blocked': [], 'server_errors': []}
+
+
 async def walk(cfg: Config, ctx: dict, personas: list[dict], label: str, origin: str, proxies: list[GuardProxy],
                state: dict | None, shots: Path, spent: dict, notes: list[str], headed: bool) -> list[dict]:
     from .agent import run_persona
@@ -108,7 +114,7 @@ async def walk(cfg: Config, ctx: dict, personas: list[dict], label: str, origin:
         async with gate:
             if spent['tokens'] >= cfg.budget.max_tokens:
                 notes.append(f"Budget: skipped {persona['name']} on {label}, {spent['tokens']} tokens spent.")
-                return None
+                return unfinished_session(persona, label, 'budget-skipped', 'Token budget exhausted before testing.')
             print(f"  [{label}] start {persona['name']} ({persona['device']}): {persona['goal'][:100]}", flush=True)
             result = await run_persona(cfg, ctx, persona, label, origin, proxies[i], state, shots, headed)
             spent['tokens'] += result['tokens']
@@ -126,14 +132,13 @@ async def walk(cfg: Config, ctx: dict, personas: list[dict], label: str, origin:
     results = []
     for persona, task in zip(personas, tasks):
         if task not in done:
+            results.append(unfinished_session(persona, label, 'timed-out', 'Testing timed out before finishing.'))
             continue
         if task.exception():  # a persona that broke before its agent ran is reported, never dropped
             error = task.exception()
             print(f"  [{label}] {persona['name']} failed: {type(error).__name__}: {error}", flush=True)
-            results.append({**persona, 'target': label, 'verdict': f'CRASHED: {type(error).__name__}: {str(error)[:200]}',
-                            'achieved': False, 'crashed': True, 'done': False, 'success': None,
-                            'worked_well': [], 'steps': 0, 'tokens': 0, 'seconds': 0,
-                            'issues': [], 'guard_blocked': [], 'server_errors': []})
+            results.append(unfinished_session(persona, label, 'crashed',
+                                               f'CRASHED: {type(error).__name__}: {str(error)[:200]}'))
         elif task.result():
             results.append(task.result())
     if personas and results and all(r['crashed'] for r in results):
@@ -143,7 +148,10 @@ async def walk(cfg: Config, ctx: dict, personas: list[dict], label: str, origin:
 
 async def run(cfg: Config, *, out: Path, pr: str | None = None, pr_context_file: str | None = None,
               url: str | None = None, baseline: bool = True, model_selection: bool = True,
-              headed: bool = False) -> dict:
+              headed: bool = False, checks_only: bool = False,
+              personas_override: list[dict] | None = None, previous: dict | None = None) -> dict:
+    if (out / 'evidence.json').exists():
+        raise ValueError(f'{out} already contains a run; choose a new output directory')
     out.mkdir(parents=True, exist_ok=True)
     shots, logs = out / 'shots', out / 'guard'
     shots.mkdir(exist_ok=True)
@@ -157,13 +165,14 @@ async def run(cfg: Config, *, out: Path, pr: str | None = None, pr_context_file:
             'model': f'{cfg.llm.provider}:{cfg.llm.model}', 'version': __version__,
             'run_id': time.strftime('%Y%m%d-%H%M%S') + '-' + os.urandom(3).hex(),
             'images_repo': cfg.report.images_repo, 'max_steps': cfg.personas.max_steps,
+            'mode': 'checks-only' if checks_only else 'personas', 'targets': [t[0] for t in targets],
             'fail_on': cfg.report.fail_on, 'fail_on_unclassified': cfg.report.fail_on_unclassified,
             'no_em_dashes': cfg.report.no_em_dashes, 'notes': []}
     notes, spent = meta['notes'], {'tokens': 0}
 
     ctx = pr_context(pr, pr_context_file)
     selection = select(cfg, ctx['files'])
-    if cfg.journeys and model_selection and ctx['files']:
+    if cfg.journeys and model_selection and ctx['files'] and not checks_only:
         spent['tokens'] += await add_with_model(cfg, selection, ctx)
     meta['selection'] = selection.reasons
     if cfg.journeys and not selection.journeys:
@@ -171,9 +180,15 @@ async def run(cfg: Config, *, out: Path, pr: str | None = None, pr_context_file:
         evidence = {'meta': meta, 'baseline_ran': False, 'checks': [], 'sessions': [], 'raw_issues': [], 'merge': None}
         return finish(cfg, out, evidence)
 
-    personas, tokens = await plan(cfg, ctx, selection.journeys)
+    personas, tokens = (([], 0) if checks_only else (personas_override, 0) if personas_override is not None else
+                        await plan(cfg, ctx, selection.journeys))
     spent['tokens'] += tokens
+    planned_personas = personas
     personas = fit_budget(cfg, personas, len(targets), notes)
+    meta['checks_per_target'] = len(check_targets(cfg, selection.journeys))
+    from .workflow import scenario_key
+
+    meta['scenario_key'] = scenario_key(cfg, selection.journeys)
     print('Personas: ' + '; '.join(f"{p['name']} ({p['device']}, {p['journey'] or p['start_path']})" for p in personas),
           flush=True)
 
@@ -199,21 +214,27 @@ async def run(cfg: Config, *, out: Path, pr: str | None = None, pr_context_file:
 
                 checks += await run_checks(cfg, origin, label, check_targets(cfg, selection.journeys),
                                            checker.server, state, shots, sandbox)
-                sessions += await walk(cfg, ctx, personas, label, origin, proxies, state, shots, spent, notes, headed)
+                if personas:
+                    sessions += await walk(cfg, ctx, personas, label, origin, proxies, state, shots, spent, notes, headed)
     finally:
         shutil.rmtree(private, ignore_errors=True)
 
     raw = [i for s in sessions for i in s['issues']]
     preview_raw = [i for i in raw if i['target'] == 'preview']
-    merged, tokens = await merge(cfg, ctx, preview_raw, [s for s in sessions if s['target'] == 'preview'])
+    merged, tokens = (({'issues': [], 'dropped': []}, 0) if checks_only else
+                      await merge(cfg, ctx, preview_raw, [s for s in sessions if s['target'] == 'preview']))
     spent['tokens'] += tokens
     if merged is None:
         notes.append('The merge pass reply was unusable, so every raw report is listed unmerged.')
-    evidence = {'meta': meta, 'baseline_ran': any(s['target'] == 'baseline' for s in sessions),
-                'ctx': {'title': ctx['title'], 'files': ctx['files']}, 'personas': personas,
+    evidence = {'meta': meta, 'baseline_ran': any(c['target'] == 'baseline' for c in checks),
+                'ctx': {'title': ctx['title'], 'files': ctx['files']}, 'personas': planned_personas,
                 'checks': checks, 'sessions': [{k: v for k, v in s.items() if k != 'issues'} for s in sessions],
                 'raw_issues': raw, 'merge': merged}
-    evidence['fixes'] = await add_fixes(cfg, evidence, pr, pr_context_file, spent, notes)
+    if previous is not None:
+        from .workflow import compare
+
+        evidence['comparison'] = compare(previous, evidence)
+    evidence['fixes'] = {} if checks_only else await add_fixes(cfg, evidence, pr, pr_context_file, spent, notes)
     meta['tokens'] = spent['tokens']
     return finish(cfg, out, evidence)
 
@@ -242,12 +263,16 @@ def finish(cfg: Config, out: Path, evidence: dict) -> dict:
 def report_from(fail_on: list[str], fail_unclassified: bool, no_em_dashes: bool, out: Path, evidence: dict,
                 images: dict[str, str] | None = None) -> dict:
     verdict = judge(evidence, fail_on, fail_unclassified)
+    verdict['comparison'] = evidence.get('comparison')
     preview_raw = [i for i in evidence['raw_issues'] if i['target'] == 'preview']
     dropped = [{**d, 'title': preview_raw[d['id']]['title']} for d in (evidence.get('merge') or {}).get('dropped', [])
                if d['id'] < len(preview_raw)]
     meta = evidence['meta']
     text = render(meta, verdict, evidence['sessions'], evidence['checks'], dropped, no_em_dashes, images)
     write(out, text, {'version': meta.get('version'), 'meta': meta, **verdict})
+    from .visual_report import render as render_html
+
+    (out / 'report.html').write_text(render_html(out, evidence, verdict))
     return {'report': text, **verdict}
 
 

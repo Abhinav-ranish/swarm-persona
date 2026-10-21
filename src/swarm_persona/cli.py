@@ -18,6 +18,12 @@ from . import __version__
 from .config import load
 
 
+def result_code(result: dict, no_gate: bool = False) -> int:
+    if result.get('run_health', {}).get('state') not in ('complete', 'skipped'):
+        return 2
+    return 0 if result['passed'] or no_gate else 1
+
+
 def cmd_run(args) -> int:
     from .github import step_summary
     from .run import publish, run
@@ -25,14 +31,14 @@ def cmd_run(args) -> int:
     cfg = load(args.config)
     result = asyncio.run(run(cfg, out=Path(args.out), pr=args.pr, pr_context_file=args.pr_context, url=args.url,
                              baseline=not args.no_baseline, model_selection=not args.no_model_selection,
-                             headed=args.headed))
+                             headed=args.headed, checks_only=args.checks_only))
     step_summary(result['report'])
     if args.comment:
         if not args.pr:
             sys.exit('--comment needs --pr')
         print(f'Comment: {publish(Path(args.out), args.pr, app_file=os.environ.get("SWARM_PERSONA_GITHUB_APP"))}')
-    print(f"\nWrote {Path(args.out) / 'report.md'}: {'passed' if result['passed'] else 'FAILED the gate'}")
-    return 0 if result['passed'] or args.no_gate else 1
+    print(f"\nReport: {Path(args.out) / 'report.html'} ({result['run_health']['state']})")
+    return result_code(result, args.no_gate)
 
 
 def cmd_replay(args) -> int:
@@ -40,7 +46,7 @@ def cmd_replay(args) -> int:
 
     result = replay(Path(args.out), args.fail_on, args.fail_on_unclassified or None)
     print(result['report'])
-    return 0 if result['passed'] else 1
+    return result_code(result)
 
 
 def cmd_publish(args) -> int:
@@ -124,10 +130,49 @@ def cmd_init(args) -> int:
     return 0
 
 
+def cmd_start(args) -> int:
+    from .run import run
+    from .workflow import configure
+
+    cfg = configure(args)
+    if args.setup_only:
+        mode = ' --checks-only' if args.checks_only else ''
+        print(f'When ready: swarm-persona run --config {args.config} --out {args.out}{mode}')
+        return 0
+    result = asyncio.run(run(cfg, out=Path(args.out), baseline=False, checks_only=args.checks_only))
+    print(f"Report: {Path(args.out) / 'report.html'} ({result['run_health']['state']})")
+    return result_code(result)
+
+
+def cmd_retest(args) -> int:
+    from .workflow import retest
+
+    result = asyncio.run(retest(load(args.config), Path(args.previous), Path(args.out), args.url))
+    print(f"Report: {Path(args.out) / 'report.html'} ({result['run_health']['state']})")
+    return result_code(result)
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog='swarm-persona', description=__doc__)
     p.add_argument('--version', action='version', version=__version__)
     sub = p.add_subparsers(dest='command', required=True)
+
+    start = sub.add_parser('start', help='guided first test: URL, task, audience and success criteria')
+    for flag in ('url', 'name', 'description', 'goal', 'audience', 'success', 'model', 'storage-state'):
+        start.add_argument('--' + flag)
+    start.add_argument('--provider', choices=['bedrock', 'anthropic', 'openai'])
+    start.add_argument('--config', default='founder-test.yml')
+    start.add_argument('--out', default='out/first-test')
+    start.add_argument('--setup-only', action='store_true', help='save the scenario without running browsers or models')
+    start.add_argument('--checks-only', action='store_true', help='entry checks only, no model calls')
+    start.set_defaults(func=cmd_start)
+
+    retest = sub.add_parser('retest', help='repeat a saved test with the same personas and compare observations')
+    retest.add_argument('previous', help='original run directory')
+    retest.add_argument('--config', required=True, help='trusted original scenario config')
+    retest.add_argument('--out', required=True, help='a separate new output directory')
+    retest.add_argument('--url', help='new public HTTPS origin after a change')
+    retest.set_defaults(func=cmd_retest)
 
     r = sub.add_parser('run', help='run the swarm and write report.md, report.json, evidence.json')
     r.add_argument('--config', required=True)
@@ -138,7 +183,8 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument('--no-baseline', action='store_true', help='skip the baseline even if configured')
     r.add_argument('--no-model-selection', action='store_true', help='journeys from globs only')
     r.add_argument('--comment', action='store_true', help='create or update the sticky PR comment')
-    r.add_argument('--no-gate', action='store_true', help='exit 0 even when the gate fails')
+    r.add_argument('--no-gate', action='store_true', help='ignore the defect gate; incomplete tests still exit 2')
+    r.add_argument('--checks-only', action='store_true', help='entry checks and screenshots, no personas or model calls')
     r.add_argument('--headed', action='store_true')
     r.set_defaults(func=cmd_run)
 

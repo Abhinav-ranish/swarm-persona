@@ -1,0 +1,412 @@
+{
+ "meta": {
+  "project": "swarm-persona",
+  "lang": "en",
+  "subtitle": "First-time task reviews and PR-aware guarded browser personas · structure only",
+  "generatedAt": "2026-10-20",
+  "htmlPath": ".codemap/codemap.html",
+  "mdPath": ".codemap/codemap.md",
+  "spineDesc": "Guided setup or CLI -> run orchestration -> guarded entry checks and persona walks -> deterministic judge and execution health -> portable local HTML, Markdown and JSON. Retests reuse recorded personas; optional publication remains separate.",
+  "rev": "4550c152ff3ac05983fd7d093686a59fb8af9b73",
+  "tracked_loc": 4260,
+  "tracked_files": 31
+ },
+ "bands": [
+  {
+   "id": "entry",
+   "tier": "be",
+   "t": "01 · Entry points",
+   "d": "Ways to invoke the same runner"
+  },
+  {
+   "id": "planning",
+   "tier": "be",
+   "t": "02 · Test planning",
+   "d": "Changed files → journeys → people and devices"
+  },
+  {
+   "id": "execution",
+   "tier": "be",
+   "t": "03 · Guarded execution",
+   "d": "Authenticate, prove safety, check, explore"
+  },
+  {
+   "id": "evaluation",
+   "tier": "be",
+   "t": "04 · Evidence evaluation",
+   "d": "Model descriptions, rule-based decisions"
+  },
+  {
+   "id": "output",
+   "tier": "be",
+   "t": "05 · Results & integrations",
+   "d": "Local reports; optional external publication"
+  },
+  {
+   "id": "foundation",
+   "tier": "be",
+   "t": "Shared foundations",
+   "d": "Configuration, preflight and model access"
+  }
+ ],
+ "spine": [
+  "cli",
+  "run",
+  "checks",
+  "agent",
+  "merge",
+  "judge",
+  "report"
+ ],
+ "reportThemes": [],
+ "modules": [
+  {
+   "id": "cli",
+   "label": "CLI",
+   "band": "entry",
+   "path": "src/swarm_persona/cli.py",
+   "paths": [
+    "src/swarm_persona/cli.py"
+   ],
+   "coupling": "high",
+   "deps": [
+    "config",
+    "github",
+    "guard",
+    "mcp",
+    "planning",
+    "run",
+    "tickets",
+    "workflow"
+   ],
+   "desc": "Guided start, recorded-plan retest and existing run, replay, publication and MCP commands. Exit 2 distinguishes incomplete execution from the defect gate.",
+   "loc": 258,
+   "contentHash": "43344f0ea8bd757d50f11e1e314f0e5488685e2784da0157f531c5a76565a54d"
+  },
+  {
+   "id": "mcp",
+   "label": "MCP run manager",
+   "band": "entry",
+   "path": "src/swarm_persona/mcp_server.py",
+   "paths": [
+    "src/swarm_persona/mcp_server.py"
+   ],
+   "coupling": "high",
+   "deps": [
+    "cli",
+    "config",
+    "planning"
+   ],
+   "desc": "Stdio tools launch detached CLI processes, track local run directories, limit concurrency to two runs, and terminate process groups. Auth output stays in a private log.",
+   "loc": 340,
+   "contentHash": "126c0c566d43bf67f59d5eb94c203fbf17be10c4affbec7c2f48ca5e006991ae"
+  },
+  {
+   "id": "ci",
+   "label": "CI & AWS runners",
+   "band": "entry",
+   "path": "action.yml, examples/workflow.yml, deploy/aws/*.sh, deploy/aws/buildspec.yml",
+   "paths": [
+    "action.yml",
+    "examples/workflow.yml",
+    "deploy/aws/*.sh",
+    "deploy/aws/buildspec.yml"
+   ],
+   "coupling": "med",
+   "deps": [
+    "cli",
+    "package"
+   ],
+   "desc": "GitHub Actions and AWS CodeBuild install the runner and browsers, supply trusted configuration and collect evidence. These workflows can upload artifacts and publish comments.",
+   "loc": 430,
+   "contentHash": "48dc86c47567519cce0a4128e42259ffad356c6a2c03b9f61f2d174a5131a2f5"
+  },
+  {
+   "id": "planning",
+   "label": "Journey & persona planning",
+   "band": "planning",
+   "path": "src/swarm_persona/journeys.py, src/swarm_persona/planner.py",
+   "paths": [
+    "src/swarm_persona/journeys.py",
+    "src/swarm_persona/planner.py"
+   ],
+   "coupling": "high",
+   "deps": [
+    "config",
+    "llm"
+   ],
+   "desc": "Changed-file ownership globs select journeys; the model can add unclaimed impacts. Saved personas fill seats before generation. Configured journey goals remain authoritative.",
+   "loc": 245,
+   "contentHash": "ca2f3977600b06c098d62c2469e582bc7dbeb642d08353f0ba9d59e421e5e421"
+  },
+  {
+   "id": "run",
+   "label": "Run orchestration",
+   "band": "execution",
+   "path": "src/swarm_persona/run.py",
+   "paths": [
+    "src/swarm_persona/run.py"
+   ],
+   "coupling": "core",
+   "deps": [
+    "agent",
+    "checks",
+    "config",
+    "fixes",
+    "github",
+    "guard",
+    "judge",
+    "merge",
+    "planning",
+    "preflight",
+    "report",
+    "workflow"
+   ],
+   "desc": "Coordinates guarded checks and persona walks, recording the full plan and unfinished attempts. Supports model-free entry checks and reused plans. Saves evidence before deriving local reports.",
+   "loc": 310,
+   "contentHash": "2a586c674292e6b8b758f5c1067ac0408d1fa6a3b53a690b80cb405f1358d23d"
+  },
+  {
+   "id": "guard",
+   "label": "Network write guard",
+   "band": "execution",
+   "path": "src/swarm_persona/guard/policy.py, src/swarm_persona/guard/proxy.py, src/swarm_persona/guard/addon.py, src/swarm_persona/guard/__init__.py",
+   "paths": [
+    "src/swarm_persona/guard/policy.py",
+    "src/swarm_persona/guard/proxy.py",
+    "src/swarm_persona/guard/addon.py",
+    "src/swarm_persona/guard/__init__.py"
+   ],
+   "coupling": "core",
+   "deps": [
+    "config"
+   ],
+   "desc": "One mitmdump proxy per browser. Pure policy evaluates requests; the addon enforces it, pins public DNS addresses, refuses forbidden writes and protocols, and records refusals and app 5xx responses. Every proxy must pass self-tests.",
+   "loc": 474,
+   "contentHash": "06dcefd4c3f961ccb90dd39aa54dd39ee8dc2ade21a7de26b1727dc5a1f61308"
+  },
+  {
+   "id": "agent",
+   "label": "Persona browser walks",
+   "band": "execution",
+   "path": "src/swarm_persona/agent.py",
+   "paths": [
+    "src/swarm_persona/agent.py"
+   ],
+   "coupling": "high",
+   "deps": [
+    "config",
+    "guard",
+    "llm"
+   ],
+   "desc": "browser-use drives vision-enabled Chromium sessions. Restricted actions open app pages and report issues with screenshots. Each walk records completion, tokens, issues and proxy-observed server errors.",
+   "loc": 201,
+   "contentHash": "05e8a82ed2e5c18b38d70796d1ea70e5e7079a7cfdea8869cf2a9f9d61aa11b7"
+  },
+  {
+   "id": "checks",
+   "label": "Entry-page checks",
+   "band": "execution",
+   "path": "src/swarm_persona/checks.py",
+   "paths": [
+    "src/swarm_persona/checks.py"
+   ],
+   "coupling": "high",
+   "deps": [
+    "agent",
+    "config"
+   ],
+   "desc": "Plain Playwright checks each journey entry on desktop/mobile. Records HTTP status, page/console errors, failed requests and trial-click actionability; creates stable signal fingerprints.",
+   "loc": 134,
+   "contentHash": "b53ce09c4b76e4685b41b05259a9283a574c8e374fb6f803440e67ee909e0693"
+  },
+  {
+   "id": "merge",
+   "label": "Issue consolidation",
+   "band": "evaluation",
+   "path": "src/swarm_persona/merge.py",
+   "paths": [
+    "src/swarm_persona/merge.py"
+   ],
+   "coupling": "med",
+   "deps": [
+    "config",
+    "llm"
+   ],
+   "desc": "A model groups duplicate persona reports and identifies setup noise. Validates source IDs and lists omitted reports. Cannot remove hard signals or assign final severity.",
+   "loc": 66,
+   "contentHash": "eba26af1eb0efbcd81f1f8ea665b2d8cf2fd91fd2f9a8f50af3547e48b259ac2"
+  },
+  {
+   "id": "judge",
+   "label": "Deterministic verdicts",
+   "band": "evaluation",
+   "path": "src/swarm_persona/judge.py",
+   "paths": [
+    "src/swarm_persona/judge.py"
+   ],
+   "coupling": "core",
+   "deps": [
+    "checks",
+    "config"
+   ],
+   "desc": "Pure deterministic findings and defect gate, separate from planned/completed execution health. Agent task completion is self-reported. Unfinished attempts do not become product journey failures.",
+   "loc": 301,
+   "contentHash": "5aec0739186acb549a9fc35e210081a24ea32098be1029a1af223c024cfeacea"
+  },
+  {
+   "id": "fixes",
+   "label": "Possible fix suggestions",
+   "band": "evaluation",
+   "path": "src/swarm_persona/fixes.py",
+   "paths": [
+    "src/swarm_persona/fixes.py"
+   ],
+   "coupling": "med",
+   "deps": [
+    "config",
+    "judge",
+    "llm",
+    "planning"
+   ],
+   "desc": "Opt-in model calls use journey-owned PR diff sections after excluding secret-like paths. At most five attempts; suggestions remain unverified and never change source code.",
+   "loc": 134,
+   "contentHash": "a0319c24a9e32a315bfa624b481eba98a45de2fcd4e71f7f2f888fb091e6a7ab"
+  },
+  {
+   "id": "report",
+   "label": "Report rendering",
+   "band": "output",
+   "path": "src/swarm_persona/report.py, src/swarm_persona/visual_report.py",
+   "paths": [
+    "src/swarm_persona/report.py",
+    "src/swarm_persona/visual_report.py"
+   ],
+   "coupling": "high",
+   "deps": [
+    "config"
+   ],
+   "desc": "Portable local HTML with ranked findings, embedded screenshots, next steps and retest observations, plus Markdown and JSON. Escapes untrusted text and makes incomplete execution explicit.",
+   "loc": 351,
+   "contentHash": "f58ca03446500ffa2c33643f8fb0253af6bab09129d63705423ea7cd09699790"
+  },
+  {
+   "id": "tickets",
+   "label": "Ticket generation",
+   "band": "output",
+   "path": "src/swarm_persona/tickets.py",
+   "paths": [
+    "src/swarm_persona/tickets.py"
+   ],
+   "coupling": "med",
+   "deps": [
+    "judge",
+    "report"
+   ],
+   "desc": "Rebuilds findings from evidence, groups by stable fingerprint and writes tickets.json. Optional GitHub issue creation/reopening deduplicates by author and hidden marker.",
+   "loc": 146,
+   "contentHash": "be3b9cc7788e79ff54510be3d2b78d12c857c8d2bff7a52c61006c86a94811f7"
+  },
+  {
+   "id": "github",
+   "label": "GitHub integration",
+   "band": "output",
+   "path": "src/swarm_persona/github.py",
+   "paths": [
+    "src/swarm_persona/github.py"
+   ],
+   "coupling": "med",
+   "deps": [
+    "report"
+   ],
+   "desc": "GitHub API client supports CLI tokens or GitHub App auth. Updates one sticky PR comment, commits optional screenshots in one batch, and writes Actions summaries.",
+   "loc": 142,
+   "contentHash": "3677f90cfae3c7dc35b613437305e09553a4291cf282929ffb55f6f266ff8a93"
+  },
+  {
+   "id": "config",
+   "label": "Configuration contract",
+   "band": "foundation",
+   "path": "src/swarm_persona/config.py, src/swarm_persona/example.yml",
+   "paths": [
+    "src/swarm_persona/config.py",
+    "src/swarm_persona/example.yml"
+   ],
+   "coupling": "core",
+   "deps": [],
+   "desc": "Strict Pydantic models validate app origins, guard patterns, journeys, auth commands, model settings and budgets. YAML supplies all app-specific behavior; auth commands execute trusted local programs.",
+   "loc": 332,
+   "contentHash": "7e894c5a05b9d7c62302c86af4e8e26b22e74ab9165b2627e1df0839296aee9b"
+  },
+  {
+   "id": "preflight",
+   "label": "Session preflight",
+   "band": "foundation",
+   "path": "src/swarm_persona/preflight.py",
+   "paths": [
+    "src/swarm_persona/preflight.py"
+   ],
+   "coupling": "med",
+   "deps": [
+    "config",
+    "guard"
+   ],
+   "desc": "Checks cookie scopes and configured signed-in JSON endpoints before browsers start. Refuses redirects, HTTP errors and unexpected response shapes. Runs outside the browser proxy.",
+   "loc": 111,
+   "contentHash": "bd53b02c7783209e69cdfbcd7afbf21d5a41d2fdb05352ef36a63633e47b193a"
+  },
+  {
+   "id": "llm",
+   "label": "Model provider adapter",
+   "band": "foundation",
+   "path": "src/swarm_persona/llm.py",
+   "paths": [
+    "src/swarm_persona/llm.py"
+   ],
+   "coupling": "high",
+   "deps": [
+    "config"
+   ],
+   "desc": "Supplies Bedrock, Anthropic and OpenAI-compatible chat models to planning, browser agents, consolidation and fixes. Handles Bedrock structured tool output and token accounting.",
+   "loc": 88,
+   "contentHash": "189e7ae66e18ea055348479b63550fe312d9161d463d71742d81d27adb16886c"
+  },
+  {
+   "id": "package",
+   "label": "Package & dependencies",
+   "band": "foundation",
+   "path": "src/swarm_persona/__init__.py, pyproject.toml",
+   "paths": [
+    "src/swarm_persona/__init__.py",
+    "pyproject.toml"
+   ],
+   "coupling": "low",
+   "deps": [],
+   "desc": "Python 3.12 package version and dependency metadata. browser-use, Playwright, Pydantic and PyYAML are core; Bedrock and MCP are optional extras.",
+   "loc": 51,
+   "contentHash": "a7c6d0670821f3035882144efbfeec25c63207943e7c896ad27e6dac91ab192a"
+  },
+  {
+   "id": "workflow",
+   "label": "First test & retest",
+   "band": "entry",
+   "path": "src/swarm_persona/workflow.py",
+   "paths": [
+    "src/swarm_persona/workflow.py"
+   ],
+   "coupling": "med",
+   "deps": [
+    "config",
+    "guard",
+    "judge",
+    "run"
+   ],
+   "desc": "Guided URL/task/audience setup saves a reusable YAML scenario. Retesting validates its settings, reuses recorded personas and compares observed finding groups without claiming fixes.",
+   "tests": [
+    "tests/test_founder_workflow.py"
+   ],
+   "loc": 146,
+   "contentHash": "c6966619c5111fd301dbd5a42f1a960cc0a671a2f98f99fba26e3c65f4fc65f2"
+  }
+ ]
+}

@@ -17,7 +17,7 @@ inputs:
     description: Create or update the sticky PR comment.
     default: 'true'
   fail:
-    description: Fail the step when a new finding hits report.fail_on.
+    description: Fail the step when a finding hits report.fail_on or testing is incomplete.
     default: 'true'
   evidence-retention-days:
     description: Days to keep the screenshots and evidence artifact. Signed-in screenshots are readable by anyone on a public repository.
@@ -27,11 +27,14 @@ inputs:
     default: ''
 outputs:
   passed:
-    description: '"true" when nothing new hit the gate.'
+    description: '"true" when testing completed and nothing hit the gate.'
     value: ${{ steps.run.outputs.passed }}
   report:
     description: Path to report.md.
     value: ${{ steps.run.outputs.report }}
+  run-health:
+    description: Execution state, separate from the defect gate.
+    value: ${{ steps.run.outputs.run-health }}
 runs:
   using: composite
   steps:
@@ -66,11 +69,26 @@ runs:
         flags=(--config "$SP_CONFIG" --out "$out" --pr "$SP_PR" --pr-context "$RUNNER_TEMP/pr.json" --no-gate)
         [ -n "$SP_URL" ] && flags+=(--url "$SP_URL")
         [ "$SP_COMMENT" = true ] && flags+=(--comment)
-        SWARM_PERSONA_MITMDUMP="$(uv tool dir --bin)/mitmdump" swarm-persona run "${flags[@]}" $SP_ARGS
-        passed=$(python3 -c 'import json,sys; print(str(json.load(open(sys.argv[1]))["passed"]).lower())' "$out/report.json")
+        code=0
+        SWARM_PERSONA_MITMDUMP="$(uv tool dir --bin)/mitmdump" swarm-persona run "${flags[@]}" $SP_ARGS || code=$?
+        passed=false
+        health=error
+        if [ -f "$out/report.json" ]; then
+          passed=$(python3 -c 'import json,sys; print(str(json.load(open(sys.argv[1]))["passed"]).lower())' "$out/report.json")
+          health=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("run_health", {}).get("state", "unknown"))' "$out/report.json")
+        fi
         echo "passed=$passed" >> "$GITHUB_OUTPUT"
         echo "report=$out/report.md" >> "$GITHUB_OUTPUT"
-        if [ "$SP_FAIL" = true ] && [ "$passed" != true ]; then exit 1; fi
+        echo "run-health=$health" >> "$GITHUB_OUTPUT"
+        if [ ! -f "$out/report.json" ]; then
+          if [ "$code" -eq 0 ]; then code=2; fi
+          exit "$code"
+        fi
+        if [ "$code" -ne 0 ] && [ "$health" != incomplete ] && [ "$health" != not-tested ]; then exit "$code"; fi
+        if [ "$SP_FAIL" = true ] && [ "$passed" != true ]; then
+          if [ "$code" -ne 0 ]; then exit "$code"; fi
+          exit 1
+        fi
     - name: Keep the evidence
       if: always()
       uses: actions/upload-artifact@v4

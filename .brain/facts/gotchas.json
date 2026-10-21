@@ -97,5 +97,20 @@
     "created": "2026-10-19",
     "source": "6d769ff",
     "tags": ["hygiene", "naming"]
+  },
+  {
+    "id": "browser-history-errors",
+    "kind": "gotcha",
+    "text": "browser-use 0.13.10 can stop after repeated model call failures without raising. Inspect history errors and completion before treating its steps as a completed persona attempt.",
+    "paths": [
+      "src/swarm_persona/agent.py",
+      "tests/test_run_health.py"
+    ],
+    "created": "2026-10-20",
+    "source": "Local dependency inspection and independent review, 2026-10-20",
+    "tags": [
+      "agent",
+      "execution"
+    ]
   }
 ]

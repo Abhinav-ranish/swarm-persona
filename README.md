@@ -1,8 +1,9 @@
 # swarm-persona
 
-Simulated users test your pull request. A small swarm of LLM-driven personas (a hurried founder on
-a phone, a careful first-timer on a laptop) walk the journeys a change touches on your preview
-deploy, file UX issues with screenshots as they go, and leave one ranked report on the PR.
+Find where first-time users may get stuck on an important task. Give a small swarm of AI personas
+a URL, a task and an audience; inspect a local visual report with screenshots, then repeat the
+same test after a change. For teams using pull requests, the same runner can select affected
+journeys and leave a ranked report on the PR.
 
 Two things make it usable against a real app with a real signed-in test account:
 
@@ -33,6 +34,58 @@ PR diff ──► journey selection ──► personas ──► preflight + gua
 uv tool install "swarm-persona[bedrock] @ git+https://github.com/Abhinav-ranish/swarm-persona"
 uv tool install mitmproxy==11.1.3
 "$(uv tool dir)/swarm-persona/bin/python" -m playwright install chromium
+```
+
+Run `swarm-persona start` for guided setup. It offers starter tasks for pricing, getting started
+and finding a feature. Or supply the details directly:
+
+```bash
+swarm-persona start --url https://app.example.com/pricing --name "My app" \
+  --description "Shared notes for small design studios" \
+  --goal "Choose a plan for a five-person team" --audience "First-time founders" \
+  --success "Explain the plan, monthly price and relevant limits" \
+  --provider bedrock --config founder-test.yml --out out/first-test
+```
+
+The command saves a reusable config and runs three personas with up to 15 steps each. Configure
+your model provider credentials first. Bedrock uses the existing default model and AWS credential
+chain; `--provider anthropic` and `--provider openai` require `--model` with your provider's model
+ID and `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. No new service account or repository integration
+is required. Use `--setup-only` to save the config without starting browsers or models.
+
+Open `out/first-test/report.html` locally for the first three findings, screenshots, suggested next
+steps and all finding details. Markdown, JSON and original evidence are in the same directory.
+Reports embed available PNG screenshots and load no external resources. Treat them as sensitive
+if the tested pages contain private information. The configured model receives page content and
+screenshots during testing. Nothing is published by `start` or `retest`.
+
+```bash
+swarm-persona retest out/first-test --config founder-test.yml --out out/second-test
+# For a different preview origin, append --url https://new-preview.example.com
+```
+
+Retesting reuses the recorded persona profiles, task and model settings instead of generating
+new profiles. It keeps the original baseline when one was tested. It refuses changed scenario,
+auth configuration or budget settings, or an overlapping output directory. Edit the
+config and start a fresh `run` when deliberately changing the test. Run directories must be new.
+Old evidence without scenario metadata can be replayed, but needs a fresh run before retesting.
+The comparison counts finding groups seen again, not observed this time and newly observed.
+Grouping is coarse (journey, page and category for agent observations); an absent group does not
+prove a fix. Agent behavior still varies between runs.
+
+`start` accepts public HTTPS page URLs without query parameters, fragments or credentials.
+Writes are blocked by default. Account creation and flows that save data require a trusted config
+with exact allowed requests. `--storage-state path/to/state.json` uses an existing test login;
+the file stays outside the report. For reusable people, edit `personas.saved` in the saved config.
+
+Use `--checks-only` with `start` or `run` for entry-page checks and screenshots without model calls.
+This does not attempt the task with personas. Crashes, timeouts, skipped seats and missing planned
+attempts are reported as incomplete, even if no finding hits the defect gate. Agent-reported task
+completion is a hypothesis, not a measure of human conversion or proof of usability.
+
+For PR-based testing with a hand-edited config:
+
+```bash
 
 swarm-persona init swarm-persona.yml          # then edit it
 swarm-persona check-config --config swarm-persona.yml
@@ -40,8 +93,16 @@ swarm-persona guard-test --config swarm-persona.yml
 swarm-persona run --config swarm-persona.yml --pr 123 --out out --comment
 ```
 
-`swarm-persona run` exits 0 when nothing new hit the gate, 1 when something did, 2 when it could not
-run (bad config, preflight refused, the guard failed its self-test).
+`start`, `run`, `retest` and `replay` exit 0 when testing completed and nothing hit the defect gate
+(or a PR intentionally selected no journeys), 1 when a completed test hit the gate, and 2 when
+testing could not complete. `run --no-gate` ignores findings, but still exits 2 for incomplete tests.
+JSON exposes `gate_passed` separately from `passed`, with execution details under `run_health`.
+
+Compatibility note: when a configured step budget trims the planned personas, the result is now
+incomplete and exits 2, including with `--no-gate`. Lower `personas.count` or `max_steps`, or raise
+`budget.max_total_steps` so every planned attempt fits. The GitHub Action exposes `run-health`;
+with `fail: false` it preserves incomplete reports without failing the step. Failure to start
+still fails the Action. Reusing a completed run directory is refused to protect earlier evidence.
 
 Personas run real Chromium instances with vision models; four personas take 10 to 20 minutes and
 several GB of memory. Running them in CI or on AWS (below) is usually nicer than on a laptop.
@@ -216,7 +277,7 @@ claude mcp add swarm-persona -- swarm-persona mcp
 | Tool | What it does |
 |---|---|
 | `test(config_path, goal?, audience?, journeys?)` | starts `swarm-persona run` in the background and returns a `run_id` and a guard summary (allowed writes, whether DELETE is allowed, self-test requests, preflight checks). `journeys` keeps only the named journeys; `goal` adds an ad-hoc journey (it replaces the configured ones unless `journeys` names some to keep) and must pass the forbidden-words filter; `audience` sets `personas.audience`. At most two runs at a time |
-| `status(run_id)` | state (`running`, `closing`, `killed`, `passed`, `gate-failed`, `error`, `closed`), elapsed seconds, personas planned and done per target, the last log lines |
+| `status(run_id)` | state (`running`, `closing`, `killed`, `passed`, `gate-failed`, `incomplete`, `error`, `closed`), elapsed seconds, personas planned and done per target, the last log lines |
 | `findings(run_id)` | the run's `report.json`: gate, summary, per-persona verdicts, worked-well notes, findings |
 | `list_runs()` | known runs, newest first |
 | `close(run_id)` | SIGTERM to the run's process group, which the CLI unwinds: proxies stop and the sign-out command runs. If the run is still alive 150 seconds later, the next `status`, `list_runs` or `close` sends the group SIGKILL |

@@ -15,10 +15,9 @@ Severity is set by rules, never raised by a model:
   merged), capped at major unless it is corroborated: two or more personas hit it, or a hard
   signal fired on the same journey. The merge model's own severity is ignored.
 
-Each persona also gets pass, fail or partial against its journey's success criteria, decided from
-the evidence (crashed, done and marked successful, hit max_steps, a 5xx during its own walk). Only
-when the evidence is silent does the persona's own ACHIEVED / GAVE UP verdict decide, labelled
-self-report.
+Each persona also gets pass, fail, partial or not-run against its journey's success criteria.
+Agent-marked completion and ACHIEVED / GAVE UP text are self-reports. Crashes, step limits,
+unfinished execution and 5xx answers during the walk are recorded execution evidence.
 """
 
 from __future__ import annotations
@@ -174,7 +173,8 @@ def journey_findings(evidence: dict) -> list[dict]:
         return []
     outcome: dict[tuple, dict[str, list[bool]]] = defaultdict(lambda: defaultdict(list))
     for x in evidence['sessions']:
-        if x.get('journey') and not x.get('crashed'):
+        if (x.get('journey') and not x.get('crashed')
+                and x.get('status') not in ('budget-skipped', 'timed-out', 'crashed', 'agent-error', 'interrupted')):
             outcome[(x['journey'], x['device'])][x['target']].append(bool(x.get('achieved')))
     findings = []
     for (journey, device), by in sorted(outcome.items()):
@@ -194,9 +194,11 @@ def journey_findings(evidence: dict) -> list[dict]:
 
 
 def outcome(session: dict, fired: list[str], max_steps: int | None) -> tuple[str, str, str]:
-    """(pass / fail / partial, evidence / self-report, why) for one persona's walk."""
+    """(pass / fail / partial / not-run, evidence / self-report, why) for one persona's walk."""
     if session.get('crashed'):
         return 'fail', 'evidence', 'crashed before finishing'
+    if session.get('status') in ('budget-skipped', 'timed-out', 'agent-error', 'interrupted'):
+        return 'not-run', 'evidence', session['verdict']
     said = str(session.get('verdict') or '').strip().upper()
     signalled = f"hard signals fired: {', '.join(fired)}"
     if session.get('success') is True:
@@ -204,9 +206,9 @@ def outcome(session: dict, fired: list[str], max_steps: int | None) -> tuple[str
             return 'partial', 'evidence', f'marked the goal met, but {signalled}'
         if said.startswith('GAVE UP'):
             return 'partial', 'evidence', 'marked the goal met, but its verdict says it gave up'
-        return 'pass', 'evidence', 'finished and marked the goal met'
+        return 'pass', 'self-report', 'finished and marked the goal met'
     if session.get('done') and session.get('success') is False:
-        return 'fail', 'evidence', 'finished and marked the goal not met'
+        return 'fail', 'self-report', 'finished and marked the goal not met'
     if max_steps and not session.get('done') and session.get('steps', 0) >= max_steps:
         return 'fail', 'evidence', f'hit max_steps ({max_steps}) without finishing'
     if said.startswith('ACHIEVED'):
@@ -254,6 +256,29 @@ def summary(verdicts: list[dict], findings: list[dict]) -> str:
     return f"{done}/{len(walked)} personas completed" + (f' ({partial} partly)' if partial else '') + f'; {issues}'
 
 
+def run_health(evidence: dict) -> dict:
+    """Test execution is separate from product success and from the defect gate."""
+    meta = evidence['meta']
+    if meta.get('skipped'):
+        return {'state': 'skipped', 'planned': 0, 'completed': 0, 'targets': {}}
+    checks_only = meta.get('mode') == 'checks-only'
+    records = evidence['checks'] if checks_only else evidence['sessions']
+    targets = meta.get('targets') or sorted({r['target'] for r in records}) or ['preview']
+    counts = {}
+    for target in targets:
+        rows = [r for r in records if r['target'] == target]
+        planned = (meta.get('checks_per_target', len(rows)) if checks_only else
+                   len(evidence.get('personas', [])) if 'personas' in evidence else len(rows))
+        completed = len(rows) if checks_only else sum(
+            not r.get('crashed') and r.get('status') not in ('budget-skipped', 'timed-out', 'crashed', 'agent-error', 'interrupted')
+            and (r.get('done') or r.get('steps', 0) > 0) for r in rows)
+        counts[target] = {'planned': planned, 'completed': completed}
+    planned = sum(c['planned'] for c in counts.values())
+    completed = sum(c['completed'] for c in counts.values())
+    state = 'complete' if planned and completed == planned else 'incomplete' if planned else 'not-tested'
+    return {'state': state, 'planned': planned, 'completed': completed, 'targets': counts}
+
+
 def judge(evidence: dict, fail_on: list[str], fail_on_unclassified: bool = False) -> dict:
     sig, improved = signal_findings(evidence)
     hard_journeys = {f['journey'] for f in sig if f['kind'] in HARD and f['classification'] != 'pre-existing'}
@@ -268,6 +293,9 @@ def judge(evidence: dict, fail_on: list[str], fail_on_unclassified: bool = False
     gating = [f for f in findings if f['severity'] in fail_on and (
         f['classification'] == 'new' or (f['classification'] == 'unclassified' and fail_on_unclassified))]
     verdicts = persona_verdicts(evidence)
+    health = run_health(evidence)
     return {'findings': findings, 'improved': improved, 'gating': [f['id'] for f in gating],
-            'passed': not gating, 'baseline_ran': evidence.get('baseline_ran', False),
+            'gate_passed': not gating, 'run_health': health,
+            'passed': not gating and health['state'] in ('complete', 'skipped'),
+            'baseline_ran': evidence.get('baseline_ran', False),
             'personas': verdicts, 'summary': summary(verdicts, findings), 'worked_well': worked_well(evidence)}

@@ -17,7 +17,7 @@ def test_a_signal_only_on_the_preview_is_new_and_blocks_when_it_fails_everywhere
     result = judge(ev, ['blocker'])
     [f] = by_kind(result, 'selector')
     assert (f['classification'], f['severity'], f['devices']) == ('new', 'blocker', ['desktop', 'mobile'])
-    assert not result['passed'] and result['gating'] == [f['id']]
+    assert not result['gate_passed'] and result['gating'] == [f['id']]
 
 
 def test_one_device_only_is_major_and_does_not_gate_on_blocker():
@@ -25,14 +25,14 @@ def test_one_device_only_is_major_and_does_not_gate_on_blocker():
                           check('baseline', device='mobile'), check('baseline', device='desktop')])
     [f] = by_kind(judge(ev, ['blocker']), 'http-status')
     assert (f['severity'], f['classification']) == ('major', 'new')
-    assert judge(ev, ['blocker'])['passed']
+    assert judge(ev, ['blocker'])['gate_passed']
 
 
 def test_a_signal_on_both_sides_is_pre_existing_and_never_gates():
     ev = evidence(checks=[check('preview', status=500), check('baseline', status=500)])
     result = judge(ev, ['blocker', 'major'])
     [f] = by_kind(result, 'http-status')
-    assert f['classification'] == 'pre-existing' and result['passed']
+    assert f['classification'] == 'pre-existing' and result['gate_passed']
 
 
 def test_fingerprints_ignore_ids_numbers_and_query_strings():
@@ -55,7 +55,7 @@ def test_console_noise_is_minor_and_never_confirms_an_agent_report():
     assert by_kind(result, 'console-error')[0]['severity'] == 'minor'
     [agent] = [f for f in result['findings'] if f['source'] == 'agent']
     assert agent['severity'] == 'major' and 'capped' in agent['rule']
-    assert result['passed']
+    assert result['gate_passed']
 
 
 def test_an_agent_blocker_stands_when_two_personas_hit_it_or_a_hard_signal_fired():
@@ -85,8 +85,8 @@ def test_agent_reports_match_the_baseline_by_journey_page_and_category():
 def test_without_a_baseline_everything_is_unclassified_and_gates_only_when_asked():
     ev = evidence(checks=[check('preview', status=500), check('preview', device='mobile', status=500)], baseline_ran=False)
     assert judge(ev, ['blocker'])['findings'][0]['classification'] == 'unclassified'
-    assert judge(ev, ['blocker'])['passed']
-    assert not judge(ev, ['blocker'], fail_on_unclassified=True)['passed']
+    assert judge(ev, ['blocker'])['gate_passed']
+    assert not judge(ev, ['blocker'], fail_on_unclassified=True)['gate_passed']
 
 
 def test_a_journey_that_only_the_preview_cannot_finish_is_a_new_major():

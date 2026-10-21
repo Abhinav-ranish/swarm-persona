@@ -122,6 +122,13 @@ def state_of(path: Path, meta: dict) -> str:
     if proc is not None and proc.poll() is not None and not exit_file.exists():
         exit_file.write_text(str(proc.returncode))
     if exit_file.exists():
+        if int(exit_file.read_text()) == 2:
+            try:
+                report = json.loads((path / 'out' / 'report.json').read_text())
+                if report.get('run_health', {}).get('state') in ('incomplete', 'not-tested'):
+                    return 'incomplete'
+            except (OSError, ValueError):
+                pass
         return EXIT_STATES.get(int(exit_file.read_text()), 'ended')
     if (proc is not None and proc.poll() is None) or (proc is None and alive(meta['pid'])):
         return 'closing' if meta.get('closed') else 'running'
@@ -264,6 +271,7 @@ def findings(run_id: str) -> dict:
     keep = ('id', 'severity', 'classification', 'title', 'detail', 'journey', 'devices', 'personas', 'rule',
             'possible_fix')
     return {'run_id': run_id, 'state': state, 'passed': data['passed'], 'summary': data.get('summary'),
+            'run_health': data.get('run_health'), 'report_html': str(path / 'out' / 'report.html'),
             'gating': data['gating'], 'personas': data.get('personas', []), 'worked_well': data.get('worked_well', []),
             'findings': [{k: f.get(k) for k in keep} | {'screenshots': [Path(s).name for s in f['screenshots']]}
                          for f in data['findings']],
