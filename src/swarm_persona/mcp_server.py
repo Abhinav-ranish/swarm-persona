@@ -125,7 +125,8 @@ def state_of(path: Path, meta: dict) -> str:
         if int(exit_file.read_text()) == 2:
             try:
                 report = json.loads((path / 'out' / 'report.json').read_text())
-                if report.get('run_health', {}).get('state') in ('incomplete', 'not-tested'):
+                health = report.get('run_health') if isinstance(report, dict) else None
+                if isinstance(health, dict) and health.get('state') in ('incomplete', 'not-tested'):
                     return 'incomplete'
             except (OSError, ValueError):
                 pass

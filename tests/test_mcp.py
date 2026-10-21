@@ -295,3 +295,13 @@ def test_incomplete_report_is_distinct_from_failure_to_start(home):
     (out / 'report.json').write_text(json.dumps({'run_health': {'state': 'incomplete'}}))
     finish(2)
     assert mcp_server.status(run_id)['state'] == 'incomplete'
+
+
+@pytest.mark.parametrize('report', [[], None, {'run_health': []}, {'run_health': None}])
+def test_incomplete_status_tolerates_nonobject_report_data(home, report):
+    run_id = mcp_server.start(str(EXAMPLE))['run_id']
+    out = home / run_id / 'out'
+    out.mkdir()
+    (out / 'report.json').write_text(json.dumps(report))
+    finish(2)
+    assert mcp_server.status(run_id)['state'] == 'error'

@@ -388,6 +388,13 @@ sign-out command runs.
 
 ## Changes
 
+**Unreleased.** Guided `start`, recorded-persona `retest`, model-free `run --checks-only`, and
+portable visual HTML reports. Upgrade note: use a new output directory for every run. Incomplete
+testing now exits 2 even with `--no-gate`, including when a step budget trims planned personas.
+JSON separates `gate_passed` from execution `run_health`; MCP exposes `incomplete` and the Action
+exposes `run-health`. Agent-marked completion is labelled as a self-report. Finding fingerprints
+are unchanged.
+
 **0.2.0.** MCP server, audience and saved personas, per-persona verdicts, `tickets`, possible
 fixes (opt-in). Upgrading from 0.1.x: agent findings now have fingerprints made only from the
 sources' journey, page and category, so the ticket marker for an agent finding is different from
