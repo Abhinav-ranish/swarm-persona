@@ -261,7 +261,7 @@ def test_setup_needs_a_model_for_other_providers_and_names_the_key():
 
 
 def test_setup_refuses_an_unknown_starter_number(tmp_path, monkeypatch):
-    answers = iter(['https://notes.example.com', 'Notes', '7'])
+    answers = iter(['https://notes.example.com', 'Notes', '7', 'Founders', 'Explain pricing', 'bedrock'])
     monkeypatch.setattr('builtins.input', lambda _: next(answers))
     config = tmp_path / 'c.yml'
     with pytest.raises(SystemExit) as stop:
@@ -599,3 +599,51 @@ def test_mcp_findings_reports_health_and_the_report_verdict(home):
     got = mcp_server.findings(run_id)
     assert got['state'] == 'incomplete' and got['passed'] is False
     assert got['run_health']['completed'] == 1 and got['report_html'].endswith('out/report.html')
+
+
+def test_config_creation_race_does_not_overwrite_the_other_file(tmp_path, monkeypatch):
+    config = tmp_path / 'scenario.yml'
+    original = workflow.starter_config
+    def another_writer(*args, **kwargs):
+        cfg = original(*args, **kwargs)
+        config.write_text('written by another process')
+        return cfg
+    monkeypatch.setattr(workflow, 'starter_config', another_writer)
+    with pytest.raises(SystemExit) as stop:
+        main(['start', '--url', 'https://notes.example.com', '--name', 'Notes', '--goal', 'g',
+              '--audience', 'Founders', '--success', 's', '--provider', 'bedrock',
+              '--config', str(config), '--setup-only'])
+    assert stop.value.code == 2
+    assert config.read_text() == 'written by another process'
+
+
+def test_an_incomplete_test_without_defects_does_not_claim_the_defect_gate_failed(tmp_path):
+    ev = evidence(sessions=[session('preview', 1, crashed=True, steps=0)], baseline_ran=False)
+    (tmp_path / 'evidence.json').write_text(json.dumps(ev))
+    report = replay(tmp_path)['report']
+    assert 'Testing incomplete; defect gate: Passed' in report and '**Failed**' not in report
+
+
+def test_retest_rejects_a_nonlist_plan_with_a_clear_validation_error(tmp_path):
+    cfg, old, _ = saved_run(tmp_path)
+    path = old / 'evidence.json'
+    ev = json.loads(path.read_text())
+    ev['personas'] = {'unexpected': 'mapping'}
+    path.write_text(json.dumps(ev))
+    with pytest.raises(ValueError, match='persona plan'):
+        asyncio.run(workflow.retest(cfg, old, tmp_path / 'after'))
+
+
+def test_checks_only_retest_requires_configured_journeys(tmp_path, monkeypatch):
+    cfg = Config.model_validate({'app': {'name': 'Notes', 'description': 'Notes', 'url': 'https://notes.example.com'}})
+    ev = evidence(checks=[check('preview', journey='/')], baseline_ran=False)
+    ev.update(personas=[])
+    ev['meta'].update(mode='checks-only', scenario_key=workflow.scenario_key(cfg, []))
+    old = tmp_path / 'old'
+    old.mkdir()
+    (old / 'evidence.json').write_text(json.dumps(ev))
+    async def forbidden(*args, **kwargs):
+        pytest.fail('unsupported retest must refuse before running')
+    monkeypatch.setattr(runner, 'run', forbidden)
+    with pytest.raises(ValueError, match='changed'):
+        asyncio.run(workflow.retest(cfg, old, tmp_path / 'after'))
