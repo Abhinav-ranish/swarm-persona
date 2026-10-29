@@ -12,6 +12,11 @@ Bump the version in both `pyproject.toml` and `src/swarm_persona/__init__.py`, a
 **X.Y.Z** paragraph to the README "Changes" section. Anything that changes a finding fingerprint, a
 config field or a CLI flag gets an upgrade note there.
 
+`uv.lock` is committed and `constraints.txt` is made from it: installs from a commit (the buildspec,
+the action) take every dependency at the locked version. After any dependency change, run `uv lock`
+and then the `uv export` command in the header of `constraints.txt`; `tests/test_repo_hygiene.py`
+fails until the two match.
+
 ## 2. Push gate: a fresh subagent review with mutation checks
 
 Before anything is pushed, a fresh subagent with no part in the work reviews the full diff against

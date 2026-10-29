@@ -40,7 +40,6 @@ line here, when the work lands or is dropped.
 
 - `plans/v020-review-nits.md`: six small fixes from the final v0.2.0 review (secret filter, ticket
   body cap, auth.log message, corrupt run.json, fsync, merged classification).
-- `plans/codebuild-lockfile.md`: constraints file or committed lock for CodeBuild installs.
 - `plans/chromium-background-noise.md`: the ~50 Google requests per run the guard refuses.
 - `plans/outcome-real-model-check.md`: confirm the structured Outcome on real models.
 - `plans/unbuilt-ideas.md`: analytics-seeded personas, screenshot-only mode, A/B across two URLs,

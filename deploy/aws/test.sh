@@ -41,7 +41,8 @@ phases:
     commands:
       - export PATH="\$HOME/.local/bin:\$PATH"
       - export SWARM_PERSONA_MITMDUMP="\$(uv tool dir --bin)/mitmdump"
-      - uv run -q --python 3.12 --extra dev --extra bedrock --extra mcp pytest -q $*
+      # --locked: the tests run on the committed uv.lock, the one constraints.txt is made from.
+      - uv run -q --locked --python 3.12 --extra dev --extra bedrock --extra mcp pytest -q $*
 YAML
 )
 BUILD=$(aws codebuild start-build --region "$REGION" --project-name "$PROJECT" \

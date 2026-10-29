@@ -17,7 +17,10 @@ phases:
       - export PATH="$HOME/.local/bin:$PATH"
       - case "$SP_REF" in *[!0-9a-f]*|'') echo "SP_REF must be a full commit SHA" >&2; exit 1 ;; esac
       - '[ ${#SP_REF} -eq 40 ] || { echo "SP_REF must be a 40-character SHA" >&2; exit 1; }'
-      - uv tool install -q --python 3.12 "swarm-persona[bedrock] @ git+https://github.com/Abhinav-ranish/swarm-persona@$SP_REF" > /tmp/sp-install.log 2>&1 || (tail -40 /tmp/sp-install.log; exit 1)
+      # Every dependency at the version in that commit's uv.lock: a git install ignores the lock and
+      # would resolve fresh while this build holds model credentials. Immutable: SP_REF is a full SHA.
+      - curl -fsSL --proto '=https' -o /tmp/sp-constraints.txt "https://raw.githubusercontent.com/Abhinav-ranish/swarm-persona/$SP_REF/constraints.txt"
+      - uv tool install -q --python 3.12 --constraints /tmp/sp-constraints.txt "swarm-persona[bedrock] @ git+https://github.com/Abhinav-ranish/swarm-persona@$SP_REF" > /tmp/sp-install.log 2>&1 || (tail -40 /tmp/sp-install.log; exit 1)
       - uv tool install -q --python 3.12 mitmproxy==11.1.3 > /tmp/mitm-install.log 2>&1 || (tail -40 /tmp/mitm-install.log; exit 1)
       # The browser build that matches the Playwright inside the swarm-persona install.
       - '"$(uv tool dir)/swarm-persona/bin/python" -m playwright install --with-deps chromium > /tmp/pw-install.log 2>&1 || (tail -40 /tmp/pw-install.log; exit 1)'

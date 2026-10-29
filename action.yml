@@ -43,7 +43,7 @@ runs:
     - name: Install swarm-persona, mitmproxy and Chromium
       shell: bash
       run: |
-        uv tool install -q --python 3.12 "${GITHUB_ACTION_PATH}[bedrock]"
+        uv tool install -q --python 3.12 --constraints "${GITHUB_ACTION_PATH}/constraints.txt" "${GITHUB_ACTION_PATH}[bedrock]"
         uv tool install -q --python 3.12 mitmproxy==11.1.3
         "$(uv tool dir)/swarm-persona/bin/python" -m playwright install --with-deps chromium
     - name: Run
