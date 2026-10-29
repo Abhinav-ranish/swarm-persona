@@ -53,8 +53,8 @@ def test_an_unlisted_adr_fails(copy):
 
 
 def test_a_listed_doc_that_is_gone_fails(copy):
-    (copy / 'plans' / 'codebuild-lockfile.md').unlink()
-    assert doctor(copy) == ['.brain/index.md lists a doc that does not exist: plans/codebuild-lockfile.md']
+    (copy / 'plans' / 'chromium-background-noise.md').unlink()
+    assert doctor(copy) == ['.brain/index.md lists a doc that does not exist: plans/chromium-background-noise.md']
 
 
 def test_a_deleted_anchor_fails(copy):

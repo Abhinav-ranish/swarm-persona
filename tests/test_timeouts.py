@@ -3,6 +3,7 @@ is reported like a persona cut off at the run's timeout."""
 
 import asyncio
 import json
+import time
 
 import pytest
 from evidence_builder import evidence
@@ -42,7 +43,7 @@ class FakeProxy:
 
 
 def test_a_hung_persona_is_cut_off_on_its_own_clock_and_frees_its_slot(monkeypatch, tmp_path):
-    events, cancels = [], {1: 0}
+    events, cancels, finished = [], {1: 0}, []
     personas = [{'id': n, 'name': f'P{n}', 'device': 'desktop', 'goal': 'g', 'journey': 'write'} for n in (1, 2, 3)]
     proxies = [FakeProxy(f'p{n}', events) for n in (1, 2, 3)]
 
@@ -57,17 +58,25 @@ def test_a_hung_persona_is_cut_off_on_its_own_clock_and_frees_its_slot(monkeypat
                 return result(persona, label, steps=7, tokens=50, issues=[{'title': 'half-seen'}],
                               server_errors=[{'method': 'GET', 'path': '/x', 'status': 502}])
             cancels[1] += 1  # P1 is truly hung: it ignores the first cancel
-        await asyncio.sleep(3600)
+        try:
+            await asyncio.sleep(2)
+        finally:
+            finished.append(persona['name'])
 
     monkeypatch.setattr(agent, 'run_persona', fake_run)
     monkeypatch.setattr(run, 'CLEANUP_SECONDS', 0.1)
     notes = []
 
     async def main():  # a slot never freed would leave P2 queued until the 1-minute run timeout
-        return await asyncio.wait_for(walk(cfg(), {}, personas, 'preview', APP['url'], proxies, None, tmp_path,
-                                           {'tokens': 0}, notes, False), 20)
+        started = time.monotonic()
+        out = await asyncio.wait_for(walk(cfg(), {}, personas, 'preview', APP['url'], proxies, None, tmp_path,
+                                          {'tokens': 0}, notes, False), 5)
+        # P1 ignores its cancel for 2 s more: the slot comes back after CLEANUP_SECONDS regardless.
+        assert time.monotonic() - started < 1.5
+        return out, list(finished)
 
-    sessions = asyncio.run(main())
+
+    sessions, ended = asyncio.run(main())
     assert [s['id'] for s in sessions] == [1, 2, 3]
     p1, p2, p3 = sessions
     assert p2.get('timed_out') is None and p2['achieved'] and not proxies[1].stopped
@@ -78,7 +87,7 @@ def test_a_hung_persona_is_cut_off_on_its_own_clock_and_frees_its_slot(monkeypat
     assert events.index(('stop', 'p1')) < events.index(('walk', 'P2'))  # before the next persona took the slot
     assert p1['guard_blocked'] == proxies[0].records('guard') and p1['server_errors'] == proxies[0].records('server')
     assert (p3['steps'], p3['tokens'], len(p3['server_errors'])) == (7, 50, 1)  # what it returned is kept
-    assert cancels[1] == 1
+    assert cancels[1] == 1 and ended == ['P1']  # the straggler was cancelled again before walk returned
     assert notes == [f'Timeout: 2 persona run(s) on preview hit the persona timeout ({LIMIT} minutes): P1, P3.']
     ev = evidence(sessions=[{k: v for k, v in s.items() if k != 'issues'} for s in sessions])
     verdict = judge(ev, ['blocker'])
@@ -144,7 +153,7 @@ def test_the_run_signs_out_after_a_persona_timeout(monkeypatch, tmp_path):
     monkeypatch.setattr(run, 'merge', fake_merge)
     monkeypatch.setattr(agent, 'run_persona', fake_run)
     c = cfg(auth={'command': 'login {state}', 'sign_out_command': 'logout {state}'})
-    report = asyncio.run(asyncio.wait_for(run.run(c, out=tmp_path / 'out'), 20))
+    report = asyncio.run(asyncio.wait_for(run.run(c, out=tmp_path / 'out'), 5))
     assert report['summary'].startswith('1/2 personas completed; 1 timed out')
     assert events.index(('stop', 'preview-1')) < events.index(('walk', 'P2'))
     assert events[-1] == ('command', 'logout') and events.count(('command', 'logout')) == 1
