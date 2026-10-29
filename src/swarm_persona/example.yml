@@ -86,6 +86,8 @@ budget:
   max_total_steps: 400
   max_tokens: 4000000
   timeout_minutes: 30
+  # Optional: cut off any one persona after this many minutes so a hung one frees its slot.
+  # persona_timeout_minutes: 12
 
 report:
   title: Persona swarm

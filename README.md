@@ -30,7 +30,10 @@ PR diff ──► journey selection ──► personas ──► preflight + gua
 ## Quick start
 
 ```bash
-uv tool install "swarm-persona[bedrock] @ git+https://github.com/Abhinav-ranish/swarm-persona"
+SHA="<full commit sha>"   # a SHA, not a tag: the constraints file at that commit never changes
+curl -fsSL -o constraints.txt "https://raw.githubusercontent.com/Abhinav-ranish/swarm-persona/$SHA/constraints.txt"
+uv tool install --python 3.12 --constraints constraints.txt \
+  "swarm-persona[bedrock] @ git+https://github.com/Abhinav-ranish/swarm-persona@$SHA"
 uv tool install mitmproxy==11.1.3
 "$(uv tool dir)/swarm-persona/bin/python" -m playwright install chromium
 
@@ -39,6 +42,10 @@ swarm-persona check-config --config swarm-persona.yml
 swarm-persona guard-test --config swarm-persona.yml
 swarm-persona run --config swarm-persona.yml --pr 123 --out out --comment
 ```
+
+A git install ignores `uv.lock` and resolves every dependency fresh. `constraints.txt`, made from
+the lock for the runtime and the `bedrock` extra, holds each one at the version this commit was
+tested with; the CodeBuild spec and the GitHub Action install with it too.
 
 `swarm-persona run` exits 0 when nothing new hit the gate, 1 when something did, 2 when it could not
 run (bad config, preflight refused, the guard failed its self-test).
@@ -312,8 +319,10 @@ merge pass. Vision is required.
 
 `budget.max_personas` caps the plan, `max_total_steps` caps personas x steps x targets (the plan is
 trimmed to fit), `max_tokens` stops new personas from starting once spent, and `timeout_minutes`
-cuts off the walk and keeps what finished. On SIGTERM the run unwinds: proxies stop and the
-sign-out command runs.
+cuts off the walk and keeps what finished. `persona_timeout_minutes` (optional, off by default)
+bounds each persona's own walk: a persona that hangs is cut off, its browser and guard proxy are
+stopped, and its slot goes to the next persona instead of holding the queue until the whole walk
+times out. On SIGTERM the run unwinds: proxies stop and the sign-out command runs.
 
 ## Limits
 
@@ -326,6 +335,18 @@ sign-out command runs.
   production, leave `baseline_url` out and read findings as unclassified.
 
 ## Changes
+
+**0.2.2.** New optional `budget.persona_timeout_minutes` (a positive number; unset keeps 0.2.1's
+behaviour). A persona that hits it is reported like one cut off at `timeout_minutes`: a failed
+session, counted as timed out in the summary, kept out of the journey rule, its guard records kept.
+Its browser and guard proxy are stopped and its slot goes to the next persona. A cut-off persona's
+guard records now come from its proxy's log even when its walk returned nothing. Persona planning
+no longer reads the PR body: personas are cast from `personas.audience` and `app.description`, with
+the PR title and changed files as context, so `--pr-context` files need only `title` and `files`.
+`uv.lock` is now committed, and `constraints.txt` is made from it. Upgrading: in your copy of
+`deploy/aws/buildspec.yml`, add the `curl` line that downloads `constraints.txt` at `$SP_REF` and
+pass `--constraints /tmp/sp-constraints.txt` to the swarm-persona `uv tool install`, as the
+buildspec at this release does. Evidence from 0.2.1 replays unchanged.
 
 **0.2.1.** A persona cut off at `budget.timeout_minutes` is now a session in the report, failed
 with "cut off at the N-minute timeout", instead of being left out. The summary counts every
