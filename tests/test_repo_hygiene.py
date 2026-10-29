@@ -28,7 +28,8 @@ def test_secret_files_are_ignored(path):
 @pytest.mark.parametrize('path', ['.env.example', 'uv.lock', 'constraints.txt'])
 def test_the_env_example_and_the_lock_stay_trackable(path):
     # constraints.txt is made from uv.lock, and the CodeBuild tests run on it with --locked.
-    assert subprocess.run(['git', '-C', str(ROOT), 'check-ignore', '-q', path]).returncode == 1
+    # --no-index: check-ignore never reports a tracked file, so without it this could not fail.
+    assert subprocess.run(['git', '-C', str(ROOT), 'check-ignore', '--no-index', '-q', path]).returncode == 1
 
 
 def test_the_codebuild_test_script_stores_symlinks_as_links_and_names_the_account_first():
@@ -68,9 +69,30 @@ def test_installs_from_a_commit_use_that_commits_constraints():
     url = 'https://raw.githubusercontent.com/Abhinav-ranish/swarm-persona/$SP_REF/constraints.txt'
     fetch = next(line for line in spec.splitlines() if url in line)
     install = next(line for line in spec.splitlines() if 'swarm-persona[bedrock] @ git+' in line)
-    assert 'curl -fsSL' in fetch and '-o /tmp/sp-constraints.txt' in fetch
+    assert 'curl -fsSL' in fetch and "--proto '=https'" in fetch and '-o /tmp/sp-constraints.txt' in fetch
     assert '--constraints /tmp/sp-constraints.txt' in install and spec.index(fetch) < spec.index(install)
     assert spec.index('SP_REF must be a 40-character SHA') < spec.index(fetch)  # immutable only as a full SHA
     action = (ROOT / 'action.yml').read_text()
     assert '--constraints "${GITHUB_ACTION_PATH}/constraints.txt" "${GITHUB_ACTION_PATH}[bedrock]"' in action
     assert 'uv run -q --locked ' in (ROOT / 'deploy' / 'aws' / 'test.sh').read_text()
+
+
+def test_no_pr_context_fetch_asks_for_the_body(monkeypatch):
+    """The PR body is attacker-written and is never fetched: not by the action, run.sh or the planner."""
+    from swarm_persona import planner
+
+    def fields(text):
+        return [f for m in re.finditer(r'gh pr view \S+ --json (\S+)', text) for f in m.group(1).split(',')]
+
+    for path in ('action.yml', 'deploy/aws/run.sh'):
+        found = fields((ROOT / path).read_text())
+        assert 'files' in found and 'body' not in found, path
+    seen = []
+
+    class Done:
+        stdout = '{"title": "t", "body": "b", "files": []}'
+
+    monkeypatch.setattr(planner.subprocess, 'run', lambda argv, **kw: seen.append(argv) or Done())
+    ctx = planner.pr_context('5', None)
+    assert seen and 'body' not in seen[0][seen[0].index('--json') + 1].split(',')
+    assert 'body' not in ctx and 'b' not in ctx.values()

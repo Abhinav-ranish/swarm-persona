@@ -109,7 +109,13 @@ class GuardProxy:
         path = self.log if which == 'guard' else self.server_log
         if not path.exists():
             return []
-        return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+        out = []
+        for line in path.read_text().splitlines():
+            try:  # the proxy may be mid-write (a live log, or one cut off by stop): skip what does not parse
+                out.append(json.loads(line))
+            except ValueError:
+                continue
+        return [r for r in out if isinstance(r, dict)]
 
     def stop(self) -> None:
         if self.proc and self.proc.poll() is None:

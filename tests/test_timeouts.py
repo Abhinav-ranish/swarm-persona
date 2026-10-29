@@ -54,6 +54,7 @@ def test_a_hung_persona_is_cut_off_on_its_own_clock_and_frees_its_slot(monkeypat
         try:
             await asyncio.sleep(3600)
         except asyncio.CancelledError:
+            events.append(('cancelled', persona['name']))
             if persona['id'] == 3:  # gave back what it had when it was cancelled
                 return result(persona, label, steps=7, tokens=50, issues=[{'title': 'half-seen'}],
                               server_errors=[{'method': 'GET', 'path': '/x', 'status': 502}])
@@ -85,6 +86,7 @@ def test_a_hung_persona_is_cut_off_on_its_own_clock_and_frees_its_slot(monkeypat
         assert s['verdict'] == f'TIMED OUT: cut off at the {LIMIT}-minute persona timeout' and s['issues'] == []
     assert proxies[0].stopped and proxies[2].stopped  # each one's guard proxy stopped when it was cut off
     assert events.index(('stop', 'p1')) < events.index(('walk', 'P2'))  # before the next persona took the slot
+    assert events.index(('stop', 'p1')) < events.index(('cancelled', 'P1'))  # no network while it unwinds
     assert p1['guard_blocked'] == proxies[0].records('guard') and p1['server_errors'] == proxies[0].records('server')
     assert (p3['steps'], p3['tokens'], len(p3['server_errors'])) == (7, 50, 1)  # what it returned is kept
     assert cancels[1] == 1 and ended == ['P1']  # the straggler was cancelled again before walk returned
@@ -93,6 +95,60 @@ def test_a_hung_persona_is_cut_off_on_its_own_clock_and_frees_its_slot(monkeypat
     verdict = judge(ev, ['blocker'])
     assert verdict['summary'].startswith('1/3 personas completed; 2 timed out')
     assert not [f for f in verdict['findings'] if f['source'] == 'journey']  # kept out of the journey rule
+
+
+def test_the_run_timeout_cuts_off_a_bounded_persona_and_cancels_a_hung_one_again(monkeypatch, tmp_path):
+    """persona_timeout_minutes longer than the run: the run's own timeout reaches into bounded()."""
+    finished, cancels = [], []
+    personas = [{'id': n, 'name': f'P{n}', 'device': 'desktop', 'goal': 'g', 'journey': 'write'} for n in (1, 2)]
+
+    async def fake_run(cfg, ctx, persona, label, origin, proxy, state, shots, headed):
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            cancels.append(persona['name'])
+            if persona['id'] == 2:  # gave back what it had when it was cancelled
+                return result(persona, label, steps=7, tokens=50)
+        try:  # P1 is truly hung: it ignores the first cancel
+            await asyncio.sleep(2)
+        finally:
+            finished.append(persona['name'])
+
+    real_wait = asyncio.wait
+
+    async def short_run_timeout(tasks, timeout=None):  # only the run's 1-minute wait is shortened
+        return await real_wait(tasks, timeout=0.2 if timeout == 60 else timeout)
+
+    monkeypatch.setattr(agent, 'run_persona', fake_run)
+    monkeypatch.setattr(run.asyncio, 'wait', short_run_timeout)
+    monkeypatch.setattr(run, 'CLEANUP_SECONDS', 0.1)
+    c = Config.model_validate({'app': APP, 'personas': {'concurrency': 2, 'count': 2},
+                               'budget': {'timeout_minutes': 1, 'persona_timeout_minutes': 5}})
+    notes = []
+
+    async def main():
+        started = time.monotonic()
+        out = await asyncio.wait_for(walk(c, {}, personas, 'preview', APP['url'], [None, None], None, tmp_path,
+                                          {'tokens': 0}, notes, False), 5)
+        assert time.monotonic() - started < 1.5
+        return out, list(finished)
+
+    sessions, ended = asyncio.run(main())
+    # P1 ignored its first cancel and would sleep 2 s more: it ended inside walk, so it was tracked
+    # as a straggler and cancelled again.
+    assert ended == ['P1'] and sorted(cancels) == ['P1', 'P2']
+    for s in sessions:
+        assert s['timed_out'] and s['verdict'] == 'TIMED OUT: cut off at the 1-minute timeout'
+    assert [(s['steps'], s['tokens']) for s in sessions] == [(0, 0), (7, 50)]  # P2's returned result is kept
+    assert notes == ['Timeout: 2 persona run(s) on preview were cut off at 1 minutes.']
+
+
+def test_a_half_written_guard_log_line_is_skipped(tmp_path):
+    proxy = run.GuardProxy(cfg(), APP['url'], tmp_path, tmp_path, 'preview-1')
+    proxy.log.write_text('{"method": "POST", "path": "/a"}\n{"method": "PO')
+    proxy.server_log.write_text('[1]\n{"method": "GET", "path": "/b", "status": 502}\n')
+    assert proxy.records('guard') == [{'method': 'POST', 'path': '/a'}]
+    assert proxy.records('server') == [{'method': 'GET', 'path': '/b', 'status': 502}]
 
 
 def test_without_a_persona_timeout_a_slow_persona_keeps_its_slot(monkeypatch, tmp_path):
