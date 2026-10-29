@@ -133,7 +133,7 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument('--config', required=True)
     r.add_argument('--out', required=True)
     r.add_argument('--pr', help='PR number: context from gh, and where --comment posts')
-    r.add_argument('--pr-context', help='saved `gh pr view --json title,body,files` (no gh login needed)')
+    r.add_argument('--pr-context', help='saved `gh pr view --json title,files` (no gh login needed)')
     r.add_argument('--url', help='the preview to test, overriding app.url')
     r.add_argument('--no-baseline', action='store_true', help='skip the baseline even if configured')
     r.add_argument('--no-model-selection', action='store_true', help='journeys from globs only')

@@ -44,7 +44,7 @@ fi
 BUCKET=${SP_BUCKET:-$PROJECT-$ACCOUNT}
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/swarm-persona-$PR.XXXXXX")
-gh pr view "$PR" --json number,title,body,files,url > "$WORK/pr.json"
+gh pr view "$PR" --json number,title,files,url > "$WORK/pr.json"
 cp "$CONFIG" "$WORK/swarm-persona.yml"
 cp "$HERE/buildspec.yml" "$WORK/"
 for f in ${INCLUDE[@]+"${INCLUDE[@]}"}; do cp "$f" "$WORK/"; done

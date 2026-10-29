@@ -62,7 +62,7 @@ runs:
         case "$SP_PR" in ''|*[!0-9]*) echo "pr must be a number" >&2; exit 2 ;; esac
         case "$SP_ARGS" in *[!a-z\ -]*) echo "extra-args may only hold flags" >&2; exit 2 ;; esac
         out="$RUNNER_TEMP/swarm-persona"
-        gh pr view "$SP_PR" --json title,body,files > "$RUNNER_TEMP/pr.json"
+        gh pr view "$SP_PR" --json title,files > "$RUNNER_TEMP/pr.json"
         flags=(--config "$SP_CONFIG" --out "$out" --pr "$SP_PR" --pr-context "$RUNNER_TEMP/pr.json" --no-gate)
         [ -n "$SP_URL" ] && flags+=(--url "$SP_URL")
         [ "$SP_COMMENT" = true ] && flags+=(--comment)
