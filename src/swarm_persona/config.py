@@ -177,6 +177,9 @@ class Budget(Strict):
     max_total_steps: int = Field(400, ge=1, description='Personas x steps x targets may not exceed this.')
     max_tokens: int = Field(4_000_000, ge=1, description='Stop starting personas once spent.')
     timeout_minutes: int = Field(30, ge=1)
+    persona_timeout_minutes: float | None = Field(
+        None, gt=0, allow_inf_nan=False,
+        description="Bounds each persona's own walk: a hung persona is cut off and frees its slot.")
 
 
 class Report(Strict):

@@ -4,6 +4,7 @@ No `from __future__ import annotations` here: browser-use reads the custom actio
 real types to inject browser_session, and string annotations make every action fail to register.
 """
 
+import asyncio
 import os
 import re
 import time
@@ -81,6 +82,18 @@ def read_outcome(final: str | None) -> tuple[str, list[str]]:
         return final, []
     notes = [' '.join(str(n).split())[:200] for n in outcome.worked_well[:5]]
     return outcome.verdict or 'GAVE UP: no verdict.', [n for n in notes if n]
+
+
+# How long a cancelled persona waits for its browser to close before the cancel goes on regardless.
+BROWSER_CLOSE_SECONDS = 15
+
+
+async def close_browser(session) -> None:
+    """Kill a persona's browser within a bound, whatever state it is in."""
+    try:
+        await asyncio.wait_for(session.kill(), BROWSER_CLOSE_SECONDS)
+    except (Exception, asyncio.CancelledError):
+        pass
 
 
 def task_prompt(cfg: Config, ctx: dict, persona: dict, origin: str) -> str:
@@ -165,9 +178,10 @@ async def run_persona(cfg: Config, ctx: dict, persona: dict, label: str, origin:
         args=['--ignore-certificate-errors', '--disable-quic',
               '--force-webrtc-ip-handling-policy=disable_non_proxied_udp', *QUIET]
     )
+    session = BrowserSession(browser_profile=profile)
     agent = Agent(
         task=task_prompt(cfg, ctx, persona, origin), llm=chat_model(cfg.llm), tools=tools,
-        browser_session=BrowserSession(browser_profile=profile), use_vision=True, max_failures=3,
+        browser_session=session, use_vision=True, max_failures=3,
         calculate_cost=False, use_judge=False, output_model_schema=Outcome,
     )
     started = time.time()
@@ -177,6 +191,11 @@ async def run_persona(cfg: Config, ctx: dict, persona: dict, label: str, origin:
         done, success = history.is_done(), history.is_successful()
         steps = len(history.history)
         tokens = history.usage.total_tokens if history.usage else 0
+    except asyncio.CancelledError:
+        # Cut off by a timeout. agent.run closes its browser on the way out only when nothing in
+        # its own cleanup fails first, so close it here too before the cancel goes on.
+        await close_browser(session)
+        raise
     except Exception as e:  # one broken persona must not sink the swarm
         verdict, steps, tokens = f'CRASHED: {type(e).__name__}: {str(e)[:200]}', 0, 0
         worked_well, done, success = [], False, None

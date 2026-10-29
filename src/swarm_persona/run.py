@@ -98,11 +98,62 @@ def fit_budget(cfg: Config, personas: list[dict], targets: int, notes: list[str]
     return personas
 
 
+# A persona cut off at its own timeout gets this long to close its browser before its slot is given
+# back regardless. Its guard proxy is stopped first, so a walk that will not die has no network.
+CLEANUP_SECONDS = 30
+
+
+def cut_off(persona: dict, label: str, minutes: float, clock: str, known: dict | None,
+            proxy: GuardProxy | None) -> dict:
+    """A persona cut off by a timeout, possibly before it started: a failed session, never dropped,
+    so the verdicts and the summary still count it. Its issues are left out: it never finished its
+    walk. What its guard saw stays evidence: from the result it returned, else from the proxy's log."""
+    known = known or {}
+    minutes = int(minutes) if float(minutes).is_integer() else minutes
+
+    def seen(key: str, which: str) -> list:
+        return known[key] if key in known else (proxy.records(which) if proxy is not None else [])
+
+    return {**persona, 'target': label, 'verdict': f'TIMED OUT: cut off at the {minutes}-minute {clock}',
+            'achieved': False, 'crashed': False, 'timed_out': True, 'timeout_minutes': minutes,
+            'done': False, 'success': None, 'worked_well': [], 'steps': known.get('steps', 0),
+            'tokens': known.get('tokens', 0), 'seconds': round(minutes * 60), 'issues': [],
+            'guard_blocked': seen('guard_blocked', 'guard'), 'server_errors': seen('server_errors', 'server')}
+
+
 async def walk(cfg: Config, ctx: dict, personas: list[dict], label: str, origin: str, proxies: list[GuardProxy],
                state: dict | None, shots: Path, spent: dict, notes: list[str], headed: bool) -> list[dict]:
     from .agent import run_persona
 
     gate = asyncio.Semaphore(cfg.personas.concurrency)
+    limit = cfg.budget.persona_timeout_minutes
+    hit_limit: list[str] = []
+    stragglers: list[asyncio.Task] = []
+
+    async def bounded(i: int, persona: dict) -> dict:
+        """One persona's walk, its agent run and browser close included, within its own timeout."""
+        walk_task = asyncio.create_task(run_persona(cfg, ctx, persona, label, origin, proxies[i], state, shots, headed))
+        try:
+            done, _ = await asyncio.wait({walk_task}, timeout=limit * 60)
+            if walk_task in done:
+                return walk_task.result()
+            walk_task.cancel()
+            await asyncio.wait({walk_task}, timeout=CLEANUP_SECONDS)
+        except asyncio.CancelledError:
+            # The run's own timeout: give back what the walk returned when cancelled, as the
+            # unbounded path does, so the guard records of that result are kept.
+            walk_task.cancel()
+            await asyncio.wait({walk_task}, timeout=CLEANUP_SECONDS)
+            if walk_task.done() and not walk_task.cancelled() and walk_task.exception() is None:
+                return walk_task.result()
+            raise
+        if proxies[i] is not None:
+            proxies[i].stop()  # no network for a walk that will not die; its log stays on disk
+        if not walk_task.done():
+            stragglers.append(walk_task)
+        finished = walk_task.done() and not walk_task.cancelled() and walk_task.exception() is None
+        hit_limit.append(persona['name'])
+        return cut_off(persona, label, limit, 'persona timeout', walk_task.result() if finished else None, proxies[i])
 
     async def one(i: int, persona: dict):
         async with gate:
@@ -110,9 +161,15 @@ async def walk(cfg: Config, ctx: dict, personas: list[dict], label: str, origin:
                 notes.append(f"Budget: skipped {persona['name']} on {label}, {spent['tokens']} tokens spent.")
                 return None
             print(f"  [{label}] start {persona['name']} ({persona['device']}): {persona['goal'][:100]}", flush=True)
-            result = await run_persona(cfg, ctx, persona, label, origin, proxies[i], state, shots, headed)
+            if limit:
+                result = await bounded(i, persona)
+            else:
+                result = await run_persona(cfg, ctx, persona, label, origin, proxies[i], state, shots, headed)
             spent['tokens'] += result['tokens']
-            print(f"  [{label}] done  {persona['name']}: {result['steps']} steps, {result['seconds']}s", flush=True)
+            if result.get('timed_out'):
+                print(f"  [{label}] cut off {persona['name']} at the persona timeout", flush=True)
+            else:
+                print(f"  [{label}] done  {persona['name']}: {result['steps']} steps, {result['seconds']}s", flush=True)
             return result
 
     tasks = [asyncio.create_task(one(i, p)) for i, p in enumerate(personas)]
@@ -123,19 +180,18 @@ async def walk(cfg: Config, ctx: dict, personas: list[dict], label: str, origin:
         notes.append(f'Timeout: {len(pending)} persona run(s) on {label} were cut off at '
                      f'{cfg.budget.timeout_minutes} minutes.')
         await asyncio.gather(*pending, return_exceptions=True)
+    if hit_limit:
+        notes.append(f'Timeout: {len(hit_limit)} persona run(s) on {label} hit the persona timeout '
+                     f'({limit:g} minutes): {", ".join(hit_limit)}.')
+    for task in stragglers:  # cancelled once already and still running: try again, briefly
+        task.cancel()
+    if stragglers:
+        await asyncio.wait(stragglers, timeout=CLEANUP_SECONDS)
     results = []
-    for persona, task in zip(personas, tasks):
+    for i, (persona, task) in enumerate(zip(personas, tasks)):
         if task not in done:
-            # Cut off, possibly before it started: a failed session, never dropped, so the verdicts
-            # and the summary still count it. Its issues are left out: it never finished its walk.
             known = task.result() if not task.cancelled() and not task.exception() else None
-            minutes = cfg.budget.timeout_minutes
-            results.append({**persona, 'target': label, 'verdict': f'TIMED OUT: cut off at the {minutes}-minute timeout',
-                            'achieved': False, 'crashed': False, 'timed_out': True, 'timeout_minutes': minutes,
-                            'done': False, 'success': None, 'worked_well': [],
-                            'steps': (known or {}).get('steps', 0), 'tokens': (known or {}).get('tokens', 0),
-                            'seconds': minutes * 60, 'issues': [], 'guard_blocked': (known or {}).get('guard_blocked', []),
-                            'server_errors': (known or {}).get('server_errors', [])})
+            results.append(cut_off(persona, label, cfg.budget.timeout_minutes, 'timeout', known, proxies[i]))
             continue
         if task.exception():  # a persona that broke before its agent ran is reported, never dropped
             error = task.exception()
