@@ -38,6 +38,7 @@ class FakeProxy:
         return [{'method': 'GET', 'path': f'/{self.name}', 'status': 503}]
 
     def stop(self):
+        time.sleep(0.05)  # mitmdump takes a moment to exit: a cancel sent first would reach the walk first
         self.stopped = True
         self.events.append(('stop', self.name))
 
@@ -261,6 +262,17 @@ def test_a_failing_proxy_stop_still_cancels_and_tracks_the_walk(monkeypatch, tmp
     assert sessions[0]['server_errors'] == Broken('p1', []).records('server')
 
 
+def test_a_persona_cut_off_by_the_run_timeout_keeps_its_guard_records(monkeypatch, tmp_path):
+    events, finished = [], []
+    monkeypatch.setattr(agent, 'run_persona', hung_walk(events, finished, ignore_first=False))
+    run_timeout_after(monkeypatch, 0.2)
+    proxy = FakeProxy('p1', events)
+    sessions, _ = walk_within(one_persona(), P1, [proxy], [], tmp_path, finished)  # no persona timeout
+    assert sessions[0]['timed_out'] and sessions[0]['steps'] == 0  # returned nothing when cancelled
+    assert sessions[0]['guard_blocked'] == proxy.records('guard')
+    assert sessions[0]['server_errors'] == proxy.records('server')
+
+
 def test_a_half_written_guard_log_line_is_skipped(tmp_path):
     proxy = run.GuardProxy(cfg(), APP['url'], tmp_path, tmp_path, 'preview-1')
     proxy.log.write_text('{"method": "POST", "path": "/a"}\n{"method": "PO')
@@ -369,6 +381,42 @@ def test_a_cancelled_persona_closes_its_own_browser(monkeypatch, tmp_path):
 
     asyncio.run(main())
     assert killed == ['http://127.0.0.1:9']
+
+
+def test_a_cancelled_persona_whose_browser_will_not_close_still_ends(monkeypatch, tmp_path):
+    import browser_use
+
+    async def kill(self):
+        await asyncio.sleep(3600)  # a hung CDP connection
+
+    class Agent:
+        def __init__(self, browser_session, **kw):
+            pass
+
+        async def run(self, max_steps):
+            await asyncio.sleep(3600)
+
+    class Proxy:
+        server = 'http://127.0.0.1:9'
+
+    monkeypatch.setattr(browser_use, 'Agent', Agent)
+    monkeypatch.setattr(browser_use.BrowserSession, 'kill', kill)
+    monkeypatch.setattr(agent, 'chat_model', lambda llm: None)
+    monkeypatch.setattr(agent, 'BROWSER_CLOSE_SECONDS', 0.1)
+    persona = {'id': 1, 'name': 'P1', 'who': 'w', 'device': 'desktop', 'patience': 'low', 'goal': 'g',
+               'start_path': '/'}
+
+    async def main():
+        task = asyncio.create_task(agent.run_persona(cfg(), {'title': ''}, persona, 'preview', APP['url'], Proxy(),
+                                                     None, tmp_path))
+        await asyncio.sleep(0.05)
+        started = time.monotonic()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(asyncio.shield(task), 2)
+        return time.monotonic() - started
+
+    assert asyncio.run(main()) < 1  # the close is bounded by BROWSER_CLOSE_SECONDS
 
 
 @pytest.mark.parametrize('value', [0, -1, '.nan', '.inf'])
