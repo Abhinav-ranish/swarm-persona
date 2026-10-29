@@ -143,6 +143,118 @@ def test_the_run_timeout_cuts_off_a_bounded_persona_and_cancels_a_hung_one_again
     assert notes == ['Timeout: 2 persona run(s) on preview were cut off at 1 minutes.']
 
 
+def run_timeout_after(monkeypatch, seconds):
+    """Shorten only the run's own 1-minute wait (timeout_minutes 1): bounded()'s waits keep theirs."""
+    real_wait = asyncio.wait
+
+    async def wait(tasks, timeout=None):
+        return await real_wait(tasks, timeout=seconds if timeout == 60 else timeout)
+
+    monkeypatch.setattr(run.asyncio, 'wait', wait)
+
+
+def hung_walk(events, finished, ignore_first=True):
+    """A walk that never finishes on its own; with ignore_first it shrugs off its first cancel."""
+    async def fake_run(cfg, ctx, persona, label, origin, proxy, state, shots, headed):
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            events.append(('cancelled', persona['name']))
+            if not ignore_first:
+                raise
+        try:
+            await asyncio.sleep(2)
+        finally:
+            finished.append(persona['name'])
+    return fake_run
+
+
+def one_persona(**budget):
+    return Config.model_validate({'app': APP, 'personas': {'concurrency': 1, 'count': 1},
+                                  'budget': {'timeout_minutes': 1, **budget}})
+
+
+P1 = [{'id': 1, 'name': 'P1', 'device': 'desktop', 'goal': 'g', 'journey': 'write'}]
+
+
+def walk_within(c, personas, proxies, notes, tmp_path, finished, bound=1.5):
+    async def main():
+        started = time.monotonic()
+        out = await asyncio.wait_for(walk(c, {}, personas, 'preview', APP['url'], proxies, None, tmp_path,
+                                          {'tokens': 0}, notes, False), 5)
+        assert time.monotonic() - started < bound
+        return out, list(finished)
+    return asyncio.run(main())
+
+
+def test_the_run_timeout_during_the_persona_cleanup_tracks_the_walk_and_cancels_the_persona(monkeypatch, tmp_path):
+    events, finished, notes = [], [], []
+    monkeypatch.setattr(agent, 'run_persona', hung_walk(events, finished))
+    monkeypatch.setattr(run, 'CLEANUP_SECONDS', 1.0)  # the persona timeout at 0.12 s, the run's at 0.3 s
+    run_timeout_after(monkeypatch, 0.3)
+    sessions, ended = walk_within(one_persona(persona_timeout_minutes=LIMIT), P1, [FakeProxy('p1', events)],
+                                  notes, tmp_path, finished)
+    assert ended == ['P1']  # tracked mid-cleanup and cancelled again before walk returned
+    assert sessions[0]['verdict'] == 'TIMED OUT: cut off at the 1-minute timeout'
+    # The persona ended cancelled by the run's timeout, not as a persona-timeout row.
+    assert notes == ['Timeout: 1 persona run(s) on preview were cut off at 1 minutes.']
+
+
+def test_the_run_timeout_stops_a_bounded_personas_proxy_before_its_cleanup_wait(monkeypatch, tmp_path):
+    events, finished = [], []
+    monkeypatch.setattr(agent, 'run_persona', hung_walk(events, finished, ignore_first=False))
+    run_timeout_after(monkeypatch, 0.2)
+    proxy = FakeProxy('p1', events)
+    sessions, _ = walk_within(one_persona(persona_timeout_minutes=5), P1, [proxy], [], tmp_path, finished)
+    assert proxy.stopped and events.index(('stop', 'p1')) < events.index(('cancelled', 'P1'))
+    assert sessions[0]['timed_out']
+
+
+def test_a_slow_proxy_stop_does_not_block_the_event_loop(monkeypatch, tmp_path):
+    events, finished, ticks, seen = [], [], [], []
+    monkeypatch.setattr(agent, 'run_persona', hung_walk(events, finished, ignore_first=False))
+
+    class SlowStop(FakeProxy):
+        def stop(self):
+            before = len(ticks)
+            time.sleep(0.3)  # mitmdump taking its time to exit
+            seen.append(len(ticks) - before)
+            super().stop()
+
+    async def ticker():  # stands in for the other personas' walks on the same loop
+        while True:
+            ticks.append(time.monotonic())
+            await asyncio.sleep(0.02)
+
+    async def main():
+        beat = asyncio.create_task(ticker())
+        try:
+            return await asyncio.wait_for(walk(one_persona(persona_timeout_minutes=LIMIT), {}, P1, 'preview',
+                                               APP['url'], [SlowStop('p1', events)], None, tmp_path,
+                                               {'tokens': 0}, [], False), 5)
+        finally:
+            beat.cancel()
+
+    sessions = asyncio.run(main())
+    assert seen and seen[0] >= 5  # the loop kept running while the proxy stopped
+    assert sessions[0]['timed_out']
+
+
+def test_a_failing_proxy_stop_still_cancels_and_tracks_the_walk(monkeypatch, tmp_path):
+    events, finished = [], []
+    monkeypatch.setattr(agent, 'run_persona', hung_walk(events, finished))
+    monkeypatch.setattr(run, 'CLEANUP_SECONDS', 0.1)
+
+    class Broken(FakeProxy):
+        def stop(self):
+            raise OSError('mitmdump would not stop')
+
+    sessions, ended = walk_within(one_persona(persona_timeout_minutes=LIMIT), P1, [Broken('p1', events)], [],
+                                  tmp_path, finished)
+    assert ('cancelled', 'P1') in events and ended == ['P1']  # cancelled, tracked, cancelled again
+    assert sessions[0]['crashed'] and 'mitmdump would not stop' in sessions[0]['verdict']
+
+
 def test_a_half_written_guard_log_line_is_skipped(tmp_path):
     proxy = run.GuardProxy(cfg(), APP['url'], tmp_path, tmp_path, 'preview-1')
     proxy.log.write_text('{"method": "POST", "path": "/a"}\n{"method": "PO')

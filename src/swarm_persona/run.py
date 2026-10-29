@@ -136,38 +136,42 @@ async def walk(cfg: Config, ctx: dict, personas: list[dict], label: str, origin:
         """One persona's walk, its agent run and browser close included, within its own timeout."""
         walk_task = asyncio.create_task(run_persona(cfg, ctx, persona, label, origin, proxies[i], state, shots, headed))
 
-        def track() -> None:
-            if not walk_task.done():
-                stragglers.append(walk_task)
+        async def stop_and_cancel() -> None:
+            """Proxy first, so the walk has no network while it unwinds (its log stays on disk);
+            stop() blocks for up to 10 s, so it runs off the event loop. The walk is cancelled
+            whatever stop() did, then gets CLEANUP_SECONDS to finish."""
+            try:
+                if proxies[i] is not None:
+                    await asyncio.to_thread(proxies[i].stop)
+            finally:
+                walk_task.cancel()
+            await asyncio.wait({walk_task}, timeout=CLEANUP_SECONDS)
+
+        def returned() -> bool:
+            return walk_task.done() and not walk_task.cancelled() and walk_task.exception() is None
 
         try:
             done, _ = await asyncio.wait({walk_task}, timeout=limit * 60)
         except asyncio.CancelledError:
             # The run's own timeout: give back what the walk returned when cancelled, as the
             # unbounded path does, so the guard records of that result are kept.
-            walk_task.cancel()
-            await asyncio.wait({walk_task}, timeout=CLEANUP_SECONDS)
-            if walk_task.done() and not walk_task.cancelled() and walk_task.exception() is None:
+            try:
+                await stop_and_cancel()
+            finally:
+                if not walk_task.done():
+                    stragglers.append(walk_task)
+            if returned():
                 return walk_task.result()
-            track()
             raise
         if walk_task in done:
             return walk_task.result()
-        try:
-            if proxies[i] is not None:
-                # Stopped first: no network while the walk unwinds; its log stays on disk. stop()
-                # blocks for up to 10 s, so it runs off the event loop.
-                await asyncio.to_thread(proxies[i].stop)
-            walk_task.cancel()
-            await asyncio.wait({walk_task}, timeout=CLEANUP_SECONDS)
-        except asyncio.CancelledError:  # the run's own timeout, mid-cleanup
-            walk_task.cancel()
-            track()
-            raise
-        track()
-        finished = walk_task.done() and not walk_task.cancelled() and walk_task.exception() is None
+        try:  # a cancel (the run's timeout) or a failing stop() mid-cleanup still leaves the walk tracked
+            await stop_and_cancel()
+        finally:
+            if not walk_task.done():
+                stragglers.append(walk_task)
         hit_limit.append(persona['name'])
-        return cut_off(persona, label, limit, 'persona timeout', walk_task.result() if finished else None, proxies[i])
+        return cut_off(persona, label, limit, 'persona timeout', walk_task.result() if returned() else None, proxies[i])
 
     async def one(i: int, persona: dict):
         async with gate:
