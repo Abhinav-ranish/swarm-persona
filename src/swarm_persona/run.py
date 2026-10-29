@@ -214,10 +214,13 @@ async def walk(cfg: Config, ctx: dict, personas: list[dict], label: str, origin:
         if task.exception():  # a persona that broke before its agent ran is reported, never dropped
             error = task.exception()
             print(f"  [{label}] {persona['name']} failed: {type(error).__name__}: {error}", flush=True)
+            # A failing proxy stop after a persona timeout also lands here: keep what its guard saw.
+            proxy = proxies[i]
             results.append({**persona, 'target': label, 'verdict': f'CRASHED: {type(error).__name__}: {str(error)[:200]}',
                             'achieved': False, 'crashed': True, 'done': False, 'success': None,
-                            'worked_well': [], 'steps': 0, 'tokens': 0, 'seconds': 0,
-                            'issues': [], 'guard_blocked': [], 'server_errors': []})
+                            'worked_well': [], 'steps': 0, 'tokens': 0, 'seconds': 0, 'issues': [],
+                            'guard_blocked': proxy.records('guard') if proxy is not None else [],
+                            'server_errors': proxy.records('server') if proxy is not None else []})
         elif task.result():
             results.append(task.result())
     if personas and results and all(r['crashed'] for r in results):

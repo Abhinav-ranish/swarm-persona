@@ -55,6 +55,7 @@ def test_a_hung_persona_is_cut_off_on_its_own_clock_and_frees_its_slot(monkeypat
             await asyncio.sleep(3600)
         except asyncio.CancelledError:
             events.append(('cancelled', persona['name']))
+            events.append(('proxy stopped at cancel', persona['name'], getattr(proxy, 'stopped', None)))
             if persona['id'] == 3:  # gave back what it had when it was cancelled
                 return result(persona, label, steps=7, tokens=50, issues=[{'title': 'half-seen'}],
                               server_errors=[{'method': 'GET', 'path': '/x', 'status': 502}])
@@ -86,7 +87,8 @@ def test_a_hung_persona_is_cut_off_on_its_own_clock_and_frees_its_slot(monkeypat
         assert s['verdict'] == f'TIMED OUT: cut off at the {LIMIT}-minute persona timeout' and s['issues'] == []
     assert proxies[0].stopped and proxies[2].stopped  # each one's guard proxy stopped when it was cut off
     assert events.index(('stop', 'p1')) < events.index(('walk', 'P2'))  # before the next persona took the slot
-    assert events.index(('stop', 'p1')) < events.index(('cancelled', 'P1'))  # no network while it unwinds
+    # No network while it unwinds: each proxy was already stopped when its walk saw the cancel.
+    assert ('proxy stopped at cancel', 'P1', True) in events and ('proxy stopped at cancel', 'P3', True) in events
     assert p1['guard_blocked'] == proxies[0].records('guard') and p1['server_errors'] == proxies[0].records('server')
     assert (p3['steps'], p3['tokens'], len(p3['server_errors'])) == (7, 50, 1)  # what it returned is kept
     assert cancels[1] == 1 and ended == ['P1']  # the straggler was cancelled again before walk returned
@@ -160,6 +162,7 @@ def hung_walk(events, finished, ignore_first=True):
             await asyncio.sleep(3600)
         except asyncio.CancelledError:
             events.append(('cancelled', persona['name']))
+            events.append(('proxy stopped at cancel', persona['name'], getattr(proxy, 'stopped', None)))
             if not ignore_first:
                 raise
         try:
@@ -206,7 +209,7 @@ def test_the_run_timeout_stops_a_bounded_personas_proxy_before_its_cleanup_wait(
     run_timeout_after(monkeypatch, 0.2)
     proxy = FakeProxy('p1', events)
     sessions, _ = walk_within(one_persona(persona_timeout_minutes=5), P1, [proxy], [], tmp_path, finished)
-    assert proxy.stopped and events.index(('stop', 'p1')) < events.index(('cancelled', 'P1'))
+    assert proxy.stopped and ('proxy stopped at cancel', 'P1', True) in events
     assert sessions[0]['timed_out']
 
 
@@ -253,6 +256,9 @@ def test_a_failing_proxy_stop_still_cancels_and_tracks_the_walk(monkeypatch, tmp
                                   tmp_path, finished)
     assert ('cancelled', 'P1') in events and ended == ['P1']  # cancelled, tracked, cancelled again
     assert sessions[0]['crashed'] and 'mitmdump would not stop' in sessions[0]['verdict']
+    # What the guard saw before stop() failed is still evidence: the judge builds signals from it.
+    assert sessions[0]['guard_blocked'] == Broken('p1', []).records('guard')
+    assert sessions[0]['server_errors'] == Broken('p1', []).records('server')
 
 
 def test_a_half_written_guard_log_line_is_skipped(tmp_path):
